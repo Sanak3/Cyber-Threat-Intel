@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def transformar_dados(dados_brutos):
     print("[+] Iniciando transformação e análise com NumPy...")
     vulnerabilidades_limpas = []
@@ -35,17 +36,33 @@ def transformar_dados(dados_brutos):
     # analise matematica de risco com numpy
     array_notas = np.array(notas_cvss)
 
+    total_extraido = len(dados_brutos.get("vulnerabilities", []))
+    total_com_nota = len(array_notas)
+    aguardando_analise = total_extraido - total_com_nota
+
     if len(array_notas) > 0:
         media_risco = np.mean(array_notas)
         risco_maximo = np.max(array_notas)
-        ameacas_criticas = np.sum(array_notas >= 7.0)
 
-        print("-" * 40)
-        print("  INTELIGÊNCIA DE AMEAÇAS (NumPy Engine)  ")
-        print("-" * 40)
-        print(f"[*] Média de Risco Global: {media_risco:.2f}")
+        criticas = np.sum(array_notas >= 9.0)
+        altas = np.sum((array_notas >= 7.0) & (array_notas < 9.0))
+        medias = np.sum((array_notas >= 4.0) & (array_notas < 7.0))
+        baixas = np.sum((array_notas > 0.0) & (array_notas < 4.0))
+
+        print("-" * 55)
+        print("         INTELIGÊNCIA DE AMEAÇAS (NumPy Engine)      ")
+        print("-" * 55)
+        print(f"[*] Total de CVEs Coletados: {total_extraido}")
+        print(f"[*] CVEs Aguardando Análise (NIST): {aguardando_analise}")
+        print(f"[*] CVEs Avaliados e Prontos: {total_com_nota}")
+        print("-" * 55)
+        print(f"[*] Média de Risco Global (Avaliados): {media_risco:.2f}")
         print(f"[*] Pior Risco Detectado:  {risco_maximo}")
-        print(f"[*] Ameaças Altas/Críticas (CVSS >= 7): {ameacas_criticas}")
-        print("-" * 40 + "\n")
+        print("[*] Distribuição de Severidade:")
+        print(f"    - [CRÍTICO] (9.0 - 10.0): {criticas} ameaças")
+        print(f"    - [ALTO]    (7.0 - 8.9):  {altas} ameaças")
+        print(f"    - [MÉDIO]   (4.0 - 6.9):  {medias} ameaças")
+        print(f"    - [BAIXO]   (0.1 - 3.9):  {baixas} ameaças")
+        print("-" * 55 + "\n")
 
     return vulnerabilidades_limpas

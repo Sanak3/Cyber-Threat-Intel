@@ -11,3 +11,7 @@ env/
 .DS_Store
 .idea/
 __pycache__/
+
+#json
+*.jsongit
+*.json

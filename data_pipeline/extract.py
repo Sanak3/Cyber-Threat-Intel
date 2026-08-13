@@ -1,9 +1,11 @@
 import os
+import json
 import requests
 from dotenv import load_dotenv
 
 # carrega as variaveis do arquivo env para a memoria
 load_dotenv()
+
 
 def extrair_dados_nist():
     print("[+] Iniciando extração de dados do NIST...")
@@ -27,6 +29,11 @@ def extrair_dados_nist():
         response.raise_for_status()
 
         dados = response.json()
+
+        # salvando um arquivo de debug para voce inspecionar o atraso de avaliacao
+        with open("debug_dados_api.json", "w", encoding="utf-8") as f:
+            json.dump(dados, f, indent=4)
+
         total_cves = len(dados.get('vulnerabilities', []))
         print(f"[+] Extração concluída: {total_cves} CVEs coletados com sucesso.\n")
         return dados
