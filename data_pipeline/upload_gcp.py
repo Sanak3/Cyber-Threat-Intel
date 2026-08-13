@@ -2,7 +2,10 @@ import os
 import psycopg2
 from psycopg2.extras import execute_batch
 from dotenv import load_dotenv
-from extract import extrair_dados_nist, transformar_dados
+
+# Importando de forma modular
+from extract import extrair_dados_nist
+from transform import transformar_dados
 
 # carrega as variaveis de ambiente
 load_dotenv()
@@ -25,6 +28,7 @@ def conectar_banco():
 
 
 def criar_tabela_se_nao_existir(conn):
+    # SQL limpo e sem barras invertidas quebrando o código
     query = """
             CREATE TABLE IF NOT EXISTS threats \
             ( \
@@ -63,6 +67,8 @@ def criar_tabela_se_nao_existir(conn):
 
 def enviar_dados_para_gcp(conn, dados_limpos):
     print(f"[+] Iniciando envio de {len(dados_limpos)} registros para o GCP...")
+
+    # Query de inserção limpa
     query = """
             INSERT INTO threats (cve_id, descricao, nota_cvss, severidade)
             VALUES (%(id_cve)s, %(descricao)s, %(nota_cvss)s, %(severidade)s) ON CONFLICT (cve_id) DO NOTHING; \
@@ -81,17 +87,18 @@ def enviar_dados_para_gcp(conn, dados_limpos):
 
 
 if __name__ == "__main__":
-    # 1. Processo de Extração e Transformação (Reaproveitando seu extract.py)
+    # 1. Processo de Extração (Extract)
     dados_brutos = extrair_dados_nist()
 
     if dados_brutos:
+        # 2. Processo de Transformação (Transform)
         dados_tratados = transformar_dados(dados_brutos)
 
-        # 2. Processo de Load (Carga)
         if dados_tratados:
+            # 3. Processo de Carga (Load)
             conexao = conectar_banco()
             if conexao:
                 criar_tabela_se_nao_existir(conexao)
                 enviar_dados_para_gcp(conexao, dados_tratados)
                 conexao.close()
-                print("[+] Conexão com o banco encerrada. Datapipe finalizado.")
+                print("[+] Conexão com o banco encerrada. Pipeline ETL finalizado.")
