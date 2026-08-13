@@ -15,3 +15,6 @@ __pycache__/
 #json
 *.jsongit
 *.json
+
+# Dependências do Node
+backend/node_modules/
