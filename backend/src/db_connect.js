@@ -1,5 +1,6 @@
 const { Pool } = require('pg');
-require('dotenv').config({ path: '../../.env' }); // puxa o env da raiz do projeto
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') }); // puxa o env da raiz com seguranca
 
 // configuracao do pool de conexao modular
 const pool = new Pool({
@@ -10,14 +11,9 @@ const pool = new Pool({
     port: process.env.DB_PORT,
 });
 
-// testando a conexao ao iniciar
-pool.connect((err, client, release) => {
-    if (err) {
-        console.error('erro ao conectar no banco de dados', err.stack);
-    } else {
-        console.log('[+] modulo de banco de dados conectado com sucesso');
-        release();
-    }
+// previne que o servidor node crache e desligue se o banco ficar offline em background
+pool.on('error', (err) => {
+    console.error('[-] erro no banco em segundo plano:', err.message);
 });
 
 module.exports = pool;
