@@ -19,14 +19,14 @@ function App() {
   const [estatisticas, setEstatisticas] = useState(null)
   const [ameacasCriticas, setAmeacasCriticas] = useState([])
 
-  useEffect(() => {
+useEffect(() => {
     // 1. Healthcheck da API
-    axios.get('http://localhost:5001/api/health')
+    axios.get(`${API_URL}/api/health`)
       .then(res => setApiStatus(res.data.message))
       .catch(() => setApiStatus('API Offline'))
 
     // 2. Estatísticas consolidadas para os gráficos
-    axios.get('http://localhost:5001/api/threats/stats')
+    axios.get(`${API_URL}/api/threats/stats`)
       .then(res => {
         setEstatisticas(res.data)
         setDbConectado(true)
@@ -34,10 +34,10 @@ function App() {
       .catch(() => setDbConectado(false))
 
     // 3. Lista das maiores ameaças
-    axios.get('http://localhost:5001/api/threats/critical')
+    axios.get(`${API_URL}/api/threats/critical`)
       .then(res => setAmeacasCriticas(res.data))
       .catch(err => console.error('Erro ao buscar críticas:', err))
-  }, [])
+  }, [API_URL])
 
   // Dados formatados para o gráfico de barras
   const dadosGrafico = estatisticas ? [
