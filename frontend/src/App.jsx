@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import {
@@ -12,6 +13,7 @@ import {
 import './App.css'
 
 function App() {
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
   const [apiStatus, setApiStatus] = useState('Verificando API...')
   const [dbConectado, setDbConectado] = useState(false)
   const [estatisticas, setEstatisticas] = useState(null)
