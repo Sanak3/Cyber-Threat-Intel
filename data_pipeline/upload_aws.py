@@ -66,7 +66,7 @@ def criar_tabela_se_nao_existir(conn):
 
 
 def enviar_dados_para_gcp(conn, dados_limpos):
-    print(f"[+] Iniciando envio de {len(dados_limpos)} registros para o GCP...")
+    print(f"[+] Iniciando envio de {len(dados_limpos)} registros para a AWS...")
 
     # Query de inserção limpa
     query = """
