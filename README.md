@@ -5,7 +5,7 @@
 [![API - Render](https://img.shields.io/badge/Backend-Render-46E3B7?style=flat&logo=render)](https://cyber-threat-intel-mmks.onrender.com)
 [![Database - AWS RDS](https://img.shields.io/badge/AWS-RDS%20PostgreSQL-FF9900?style=flat&logo=amazon-aws)](https://aws.amazon.com/rds/)
 
-Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que automatiza a extração, análise estatística vetorial e visualização em tempo real de vulnerabilidades críticas (**CVEs**) catalogadas pela base do **NIST (National Institute of Standards and Technology)**.
+Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que automatiza a extração paginada de larga escala (**10.000+ CVEs**), análise estatística vetorial com **NumPy** e visualização em tempo real de vulnerabilidades críticas catalogadas pela base global do **NIST NVD (National Institute of Standards and Technology)**.
 
 ---
 
@@ -19,34 +19,31 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que au
 ## 🏗️ Arquitetura do Sistema
 
 ```text
-  [ NIST NVD API 2.0 ]
-           │
-           ▼ (HTTP GET / Python)
-  [ Data Pipeline ETL ] ─── (NumPy Vectorized Engine)
-           │
-           ▼ (Upsert / SSL)
-  [ AWS RDS PostgreSQL ]
-           │
-           ▼ (SQL Query / Connection Pool)
-  [ Backend Node.js / Express ] ─── (Deploy no Render)
-           │
-           ▼ (REST API / CORS)
-  [ Dashboard React / Vite ] ─── (Deploy na Vercel / Recharts)
+  [ NIST NVD API 2.0 (10.000 CVEs) ]
+                 │
+                 ▼ (Paginação Inteligente / Rate Limit / Backoff)
+        [ Data Pipeline ETL ] ─── (NumPy Vectorized Risk Engine)
+                 │
+                 ▼ (Upsert em Lote via execute_values / SSL)
+       [ AWS RDS PostgreSQL ]
+                 │
+                 ▼ (SQL Connection Pool / Queries Agregadas)
+    [ Backend Node.js / Express ] ─── (Deploy no Render)
+                 │
+                 ▼ (REST API / CORS / Paginação)
+      [ SOC Dashboard React 19 ] ─── (Deploy na Vercel / Recharts)
 ```
+
 ---
 
 ## ⚡ Funcionalidades
-- Pipeline de Dados Automatizado (ETL): Extração em lote via API 2.0 do NIST com sanitização e normalização de registros.
 
-- Análise Vetorial com NumPy: Processamento de métricas CVSS (Common Vulnerability Scoring System), cálculo de scores médios, dispersão e categorização por severidade (Crítico, Alto, Médio, Baixo).
-
-- Persistência em Nuvem (AWS RDS): Armazenamento em banco PostgreSQL gerenciado com suporte a conexões seguras (SSL) e rotinas de Upsert para evitar duplicidade.
-
-- DevOps & DataOps (GitHub Actions): Cron job configurado para sincronização diária autônoma de novos feeds de ameaças.
-
-- API RESTful (Node.js/Express): Endpoints com pooling de conexões para agregação estatística e consulta de ameaças críticas.
-
-- SOC Dashboard (React + Recharts): Interface no formato Dark Mode com cards de métricas (KPIs), gráfico de distribuição de severidade e listagem direta para documentação oficial dos CVEs.
+- **Pipeline de Dados Escalável (10.000+ CVEs):** Extração paginada com controle estrito de *rate limit* (delays dinâmicos com/sem API Key) e retentativas com *backoff* para códigos 429/503/504.
+- **Análise Vetorial de Alta Performance (NumPy):** Parsing em cascata de métricas CVSS v3.1, v3.0 e v2.0, cálculo de desvio padrão, média global, score máximo/mínimo e indexação booleana instantânea.
+- **Carga em Lote Otimizada (AWS RDS):** Inserção massiva com `psycopg2.extras.execute_values` (`page_size=1000`) e cláusulas `ON CONFLICT` para sincronização atômica e idempotente.
+- **DataOps & Automação (GitHub Actions):** Cron job diário (03:00 BRT / 06:00 UTC) para sincronização e atualização contínua do banco.
+- **API RESTful (Node.js/Express):** Endpoints agregados (`/api/threats/stats`), catálogo paginado (`/api/threats`) e lista de alta severidade (`/api/threats/critical`).
+- **SOC Dashboard (React 19 + Recharts):** Interface estilo terminal hacker dark com busca em tempo real, filtros rápidos por severidade, paginação dinâmica, ordenação interativa de colunas e gráficos responsivos.
 
 ---
 
@@ -57,7 +54,7 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que au
 | **Pipeline ETL** | Python 3.12, NumPy, Requests, Psycopg2, Python-Dotenv |
 | **Banco de Dados** | AWS RDS (PostgreSQL 16) |
 | **Backend** | Node.js, Express, pg (PostgreSQL Client), CORS, Dotenv |
-| **Frontend** | React 18, Vite, Recharts, Axios, CSS3 Moderno |
+| **Frontend** | React 19, Vite, Recharts, Axios, CSS3 Moderno |
 | **CI/CD & Deploy** | GitHub Actions, Vercel, Render.com |
 
 ---
@@ -70,20 +67,24 @@ Cyber-Threat-Intel/
 │   └── workflows/
 │       └── etl_pipeline.yml   # Rotina diária de ingestão (GitHub Actions)
 ├── data_pipeline/
-│   ├── extract.py             # Coleta de dados na API NVD do NIST
-│   ├── transform.py           # Processamento estatístico via NumPy
-│   ├── upload_aws.py          # Carga e sincronização no AWS RDS
+│   ├── extract.py             # Coleta de 10k registros na API NVD do NIST
+│   ├── transform.py           # Análise vetorial com NumPy e parsing CVSS
+│   ├── upload_aws.py          # Carga em lote no AWS RDS PostgreSQL
 │   └── requirements.txt       # Dependências Python
 ├── backend/
 │   ├── src/
-│   │   ├── db_connect.js      # Pool de conexão PostgreSQL
-│   │   └── server.js          # Rotas e regras de negócio da API
+│   │   ├── db_connect.js      # Pool de conexão PostgreSQL com SSL
+│   │   └── server.js          # API REST com suporte a paginação e estatísticas
+│   ├── .env.example           # Template de variáveis de ambiente do backend
 │   └── package.json           # Dependências Node.js
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx            # Interface e visualização com gráficos
-│   │   └── App.css            # Estilização SOC
+│   │   ├── App.jsx            # SOC Dashboard com filtros, busca e paginação
+│   │   ├── App.css            # Estilização Cyber / SOC Dark
+│   │   └── main.jsx           # Ponto de entrada React 19
+│   ├── index.html             # HTML com fontes JetBrains Mono e Inter
 │   └── package.json           # Dependências React/Vite
+├── .env.example               # Template global de variáveis
 └── README.md
 ```
 

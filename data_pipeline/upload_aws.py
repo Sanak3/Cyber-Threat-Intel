@@ -1,39 +1,69 @@
 import os
+import time
 import psycopg2
+from psycopg2.extras import execute_values
 from dotenv import load_dotenv
+
 from extract import extrair_dados_nist
 from transform import transformar_dados
 
-# Carrega as credenciais do .env na raiz do projeto
+# Carrega as variáveis de ambiente do .env na raiz do projeto
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+load_dotenv()
 
-def upload_to_aws():
-    # 1. Extracao via API do NIST
-    dados_brutos = extrair_dados_nist()
-    if not dados_brutos:
-        print("[-] Falha na extracao de dados do NIST.")
-        return
 
-    # 2. Transformacao e analise vetorial com NumPy
+def upload_to_aws(total_registros=10000, batch_size=1000):
+    """
+    Executa o pipeline ETL ponta a ponta:
+    1. Extração paginada de até N registros da API do NIST NVD.
+    2. Transformação e análise de risco matricial com NumPy.
+    3. Carga massiva em lote via psycopg2.extras.execute_values no AWS RDS PostgreSQL.
+    """
+    inicio_total = time.time()
+    print("=" * 65)
+    print("      CYBER THREAT INTEL // PIPELINE ETL (NIST -> AWS RDS)       ")
+    print("=" * 65)
+
+    # 1. Extração dos dados brutos com paginação
+    dados_brutos = extrair_dados_nist(total_desejado=total_registros)
+    if not dados_brutos or not dados_brutos.get("vulnerabilities"):
+        print("[-] [ETL Load] Falha na extração de dados do NIST. Abortando carga.")
+        return False
+
+    # 2. Transformação e análise matemática
     vulnerabilidades = transformar_dados(dados_brutos)
     if not vulnerabilidades:
-        print("[-] Nenhuma vulnerabilidade processada para upload.")
-        return
+        print("[-] [ETL Load] Nenhuma vulnerabilidade processada para upload.")
+        return False
 
-    # 3. Carga no banco PostgreSQL gerenciado na AWS RDS
+    # 3. Preparação das tuplas para inserção em lote
+    registros_tuplas = [
+        (
+            item["id_cve"],
+            item["descricao"],
+            float(item["nota_cvss"]),
+            item["severidade"]
+        )
+        for item in vulnerabilidades
+    ]
+
+    # 4. Conexão e Carga no AWS RDS PostgreSQL
+    conn = None
+    cursor = None
     try:
-        print("[+] Conectando ao AWS RDS PostgreSQL...")
+        print("[+] [ETL Load] Conectando ao banco PostgreSQL na AWS RDS...")
         conn = psycopg2.connect(
             host=os.getenv("DB_HOST"),
             database=os.getenv("DB_NAME", "postgres"),
             user=os.getenv("DB_USER", "postgres"),
             password=os.getenv("DB_PASSWORD"),
             port=os.getenv("DB_PORT", "5432"),
-            sslmode="require"
+            sslmode="require",
+            connect_timeout=15
         )
         cursor = conn.cursor()
 
-        # Criacao da tabela threats
+        # Garante a existência da tabela threats
         create_table_query = """
         CREATE TABLE IF NOT EXISTS threats (
             cve_id VARCHAR(50) PRIMARY KEY,
@@ -45,31 +75,53 @@ def upload_to_aws():
         """
         cursor.execute(create_table_query)
 
-        # Upsert: insere novos registros ou atualiza existentes
-        insert_query = """
+        # Query de Upsert em lote de alta performance
+        upsert_query = """
         INSERT INTO threats (cve_id, descricao, nota_cvss, severidade)
-        VALUES (%s, %s, %s, %s)
+        VALUES %s
         ON CONFLICT (cve_id) DO UPDATE SET
             descricao = EXCLUDED.descricao,
             nota_cvss = EXCLUDED.nota_cvss,
-            severidade = EXCLUDED.severidade;
+            severidade = EXCLUDED.severidade,
+            data_extracao = CURRENT_TIMESTAMP;
         """
 
-        for item in vulnerabilidades:
-            cursor.execute(insert_query, (
-                item['id_cve'],
-                item['descricao'],
-                float(item['nota_cvss']),
-                item['severidade']
-            ))
+        print(f"[+] [ETL Load] Gravando {len(registros_tuplas):,} registros via execute_values (lotes de {batch_size:,})...")
+        inicio_banco = time.time()
+
+        execute_values(
+            cur=cursor,
+            sql=upsert_query,
+            argslist=registros_tuplas,
+            page_size=batch_size
+        )
 
         conn.commit()
-        cursor.close()
-        conn.close()
-        print(f"[+] SUCESSO: {len(vulnerabilidades)} registros sincronizados no AWS RDS.")
+        duracao_banco = time.time() - inicio_banco
 
+        print(f"[+] [ETL Load] SUCESSO: {len(registros_tuplas):,} registros sincronizados no AWS RDS em {duracao_banco:.2f}s!")
+
+        duracao_total = time.time() - inicio_total
+        print(f"\n[✔] Pipeline ETL concluído com êxito em {duracao_total:.1f}s.")
+        return True
+
+    except psycopg2.Error as db_err:
+        if conn:
+            conn.rollback()
+        print(f"[-] [ETL Load - ERRO POSTGRESQL] Falha na operação do banco: {db_err}")
+        return False
     except Exception as e:
-        print(f"[-] Erro de conexao ou escrita no AWS RDS: {e}")
+        if conn:
+            conn.rollback()
+        print(f"[-] [ETL Load - ERRO INESPERADO] {e}")
+        return False
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+            print("[*] Conexão com AWS RDS encerrada com segurança.")
+
 
 if __name__ == "__main__":
-    upload_to_aws()
+    upload_to_aws(total_registros=10000, batch_size=1000)

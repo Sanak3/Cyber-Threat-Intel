@@ -1,4 +1,4 @@
-name: Sincronizacao Diaria NIST -> AWS RDS
+name: Sincronizacao Diaria NIST -> AWS RDS (10k CVEs)
 
 on:
   schedule:
@@ -10,6 +10,7 @@ on:
 jobs:
   run-etl:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout do Repositorio
@@ -24,9 +25,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r data_pipeline/requirements.txt
-          pip install psycopg2-binary requests numpy python-dotenv
 
-      - name: Executar Pipeline ETL
+      - name: Executar Pipeline ETL (10.000 Registros)
         env:
           NIST_API_KEY: ${{ secrets.NIST_API_KEY }}
           DB_HOST: ${{ secrets.DB_HOST }}
