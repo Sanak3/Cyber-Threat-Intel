@@ -33,6 +33,8 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que au
            ▼ (REST API / CORS)
   [ Dashboard React / Vite ] ─── (Deploy na Vercel / Recharts)
 ```
+---
+
 ## ⚡ Funcionalidades
 - Pipeline de Dados Automatizado (ETL): Extração em lote via API 2.0 do NIST com sanitização e normalização de registros.
 
@@ -46,6 +48,8 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que au
 
 - SOC Dashboard (React + Recharts): Interface no formato Dark Mode com cards de métricas (KPIs), gráfico de distribuição de severidade e listagem direta para documentação oficial dos CVEs.
 
+---
+
 ## 🛠️ Tecnologias Utilizadas
 
 | Camada | Tecnologias |
@@ -55,6 +59,8 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que au
 | **Backend** | Node.js, Express, pg (PostgreSQL Client), CORS, Dotenv |
 | **Frontend** | React 18, Vite, Recharts, Axios, CSS3 Moderno |
 | **CI/CD & Deploy** | GitHub Actions, Vercel, Render.com |
+
+---
 
 ## 📂 Estrutura do Repositório
 
@@ -81,6 +87,10 @@ Cyber-Threat-Intel/
 └── README.md
 ```
 
-## 👤 Autor
-Desenvolvido por Igor Araújo.
-by Sanak3
+---
+
+```diff
+┌──[ developer@sanak3 ]
+└─$ whoami 
+    > Igor Araujo
+```
