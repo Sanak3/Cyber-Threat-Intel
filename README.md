@@ -90,7 +90,7 @@ Cyber-Threat-Intel/
 ---
 
 ```diff
-┌──[ developer@sanak3 ]
-└─$ whoami 
-    > Igor Araujo
++ ┌──[ developer@sanak3 ]
++ └─$ whoami 
++    > Igor Araujo
 ```
