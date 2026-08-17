@@ -1,39 +1,86 @@
-# 🛡️ Cyber Threat Intel Pipeline
+# 🛡️ Cyber Threat Intelligence Platform
 
-> Um pipeline de dados de ponta a ponta construído para extrair, processar e analisar vulnerabilidades de cibersegurança (CVEs) em tempo real.
+[![Daily ETL Pipeline](https://github.com/Sanak3/Cyber-Threat-Intel/actions/workflows/etl_pipeline.yml/badge.svg)](https://github.com/Sanak3/Cyber-Threat-Intel/actions)
+[![Frontend - Vercel](https://img.shields.io/badge/Frontend-Vercel-black?style=flat&logo=vercel)](https://cyber-threat-intel-three.vercel.app)
+[![API - Render](https://img.shields.io/badge/Backend-Render-46E3B7?style=flat&logo=render)](https://cyber-threat-intel-mmks.onrender.com)
+[![Database - AWS RDS](https://img.shields.io/badge/AWS-RDS%20PostgreSQL-FF9900?style=flat&logo=amazon-aws)](https://aws.amazon.com/rds/)
 
-Este projeto foi desenvolvido estrategicamente como um **MVP (Produto Mínimo Viável) de 5 dias**, projetado para demonstrar a integração de engenharia de dados, cloud computing e desenvolvimento full-stack. 
+Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que automatiza a extração, análise estatística vetorial e visualização em tempo real de vulnerabilidades críticas (**CVEs**) catalogadas pela base do **NIST (National Institute of Standards and Technology)**.
 
-O sistema consome dados brutos da base global do NIST, utiliza matemática de arrays para identificar ameaças críticas e serve esses dados em um dashboard na nuvem.
+---
 
-## 🚀 Arquitetura e Tecnologias (Tech Stack)
+## 🚀 Live Demo
 
-O projeto foi desenhado para simular um ambiente corporativo real de Threat Intelligence, utilizando as seguintes tecnologias:
+- **Dashboard (Frontend):** [cyber-threat-intel-three.vercel.app](https://cyber-threat-intel-three.vercel.app)
+- **API Health Check (Backend):** [cyber-threat-intel-mmks.onrender.com/api/health](https://cyber-threat-intel-mmks.onrender.com/api/health)
 
-* **Motor de Dados (Data Pipeline):** `Python` + `NumPy` (Extração via API REST, transformação e análise vetorial de risco).
-* **Armazenamento e Cloud (Database):** `PostgreSQL` hospedado no `Google Cloud Platform (GCP)`.
-* **Backend:** API REST construída com `Node.js` (Express).
-* **Frontend:** Dashboard dinâmico construído com `React`.
+---
 
-## ⚙️ Funcionalidades e Componentes da Arquitetura
+## 🏗️ Arquitetura do Sistema
 
-O ecossistema foi projetado de ponta a ponta, dividindo responsabilidades em microsserviços para garantir escalabilidade e foco em *Data Visualization* e inteligência acionável:
+```text
+  [ NIST NVD API 2.0 ]
+           │
+           ▼ (HTTP GET / Python)
+  [ Data Pipeline ETL ] ─── (NumPy Vectorized Engine)
+           │
+           ▼ (Upsert / SSL)
+  [ AWS RDS PostgreSQL ]
+           │
+           ▼ (SQL Query / Connection Pool)
+  [ Backend Node.js / Express ] ─── (Deploy no Render)
+           │
+           ▼ (REST API / CORS)
+  [ Dashboard React / Vite ] ─── (Deploy na Vercel / Recharts)
+```
+## ⚡ Funcionalidades
+- Pipeline de Dados Automatizado (ETL): Extração em lote via API 2.0 do NIST com sanitização e normalização de registros.
 
-* **Automated Data Engine (Python + NumPy):** Pipeline de ingestão que consome a API REST do NIST, realizando *parsing* de objetos JSON aninhados e limpeza estrutural. Utiliza operações vetoriais do `NumPy` para filtragem de alta performance e cálculo estatístico da matriz de risco (CVSS), isolando automaticamente ameaças de nível Alto e Crítico.
-* **Cloud Data Storage (GCP + PostgreSQL):** Arquitetura de banco de dados relacional hospedada nativamente no Google Cloud Platform. Garante persistência segura dos dados de inteligência, com modelagem de tabelas otimizada para consultas `SQL` analíticas e inserções massivas.
-* **RESTful API Bridge (Node.js):** Microsserviço de backend estruturado com Express, atuando como ponte de leitura entre o banco na nuvem e o cliente. Fornece rotas assíncronas e estruturadas para servir os dados de vulnerabilidades já lapidados.
-* **Threat Intelligence Dashboard (React):** Interface de usuário dinâmica que consome a API Node.js. Apresenta os indicadores de risco e CVEs de forma clara e visual, permitindo que analistas e equipes de segurança corporativa monitorem o cenário de ameaças com agilidade.
+- Análise Vetorial com NumPy: Processamento de métricas CVSS (Common Vulnerability Scoring System), cálculo de scores médios, dispersão e categorização por severidade (Crítico, Alto, Médio, Baixo).
 
-## 💻 Como rodar o projeto localmente
+- Persistência em Nuvem (AWS RDS): Armazenamento em banco PostgreSQL gerenciado com suporte a conexões seguras (SSL) e rotinas de Upsert para evitar duplicidade.
 
-### Pré-requisitos
-* Sistema Operacional (macOS/Linux preferencialmente)
-* Python 3.10 ou superior
-* Chave de API gratuita do [NIST NVD](https://nvd.nist.gov/developers/request-an-api-key)
+- DevOps & DataOps (GitHub Actions): Cron job configurado para sincronização diária autônoma de novos feeds de ameaças.
 
-### Passo a Passo da Instalação
+- API RESTful (Node.js/Express): Endpoints com pooling de conexões para agregação estatística e consulta de ameaças críticas.
 
-1. Clone o repositório e entre na pasta:
+- SOC Dashboard (React + Recharts): Interface no formato Dark Mode com cards de métricas (KPIs), gráfico de distribuição de severidade e listagem direta para documentação oficial dos CVEs.
+
+## 🛠️ Tecnologias Utilizadas
+
+| Camada | Tecnologias |
+| :--- | :--- |
+| **Pipeline ETL** | Python 3.12, NumPy, Requests, Psycopg2, Python-Dotenv |
+| **Banco de Dados** | AWS RDS (PostgreSQL 16) |
+| **Backend** | Node.js, Express, pg (PostgreSQL Client), CORS, Dotenv |
+| **Frontend** | React 18, Vite, Recharts, Axios, CSS3 Moderno |
+| **CI/CD & Deploy** | GitHub Actions, Vercel, Render.com |
+
+## 📂 Estrutura do Repositório
+
 ```bash
-git clone [https://github.com/SEU_USUARIO_AQUI/Cyber-Threat-Intel.git](https://github.com/SEU_USUARIO_AQUI/Cyber-Threat-Intel.git)
-cd Cyber-Threat-Intel
+Cyber-Threat-Intel/
+├── .github/
+│   └── workflows/
+│       └── etl_pipeline.yml   # Rotina diária de ingestão (GitHub Actions)
+├── data_pipeline/
+│   ├── extract.py             # Coleta de dados na API NVD do NIST
+│   ├── transform.py           # Processamento estatístico via NumPy
+│   ├── upload_aws.py          # Carga e sincronização no AWS RDS
+│   └── requirements.txt       # Dependências Python
+├── backend/
+│   ├── src/
+│   │   ├── db_connect.js      # Pool de conexão PostgreSQL
+│   │   └── server.js          # Rotas e regras de negócio da API
+│   └── package.json           # Dependências Node.js
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx            # Interface e visualização com gráficos
+│   │   └── App.css            # Estilização SOC
+│   └── package.json           # Dependências React/Vite
+└── README.md
+```
+
+## 👤 Autor
+Desenvolvido por Igor Araújo.
+by Sanak3
