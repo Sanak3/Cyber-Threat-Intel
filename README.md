@@ -89,8 +89,6 @@ Cyber-Threat-Intel/
 
 ---
 
-```text
-┌──[ developer@sanak3 ]
-└─$ whoami
-    > Igor Araujo
-```
+<div align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=17&pause=1000&color=00FF00&background=0D111700&center=true&vCenter=true&width=450&lines=developer%40Sanak3%3A~%24+Igor+Araujo" alt="developer@Sanak3:~$ Igor Araujo" />
+</div>
