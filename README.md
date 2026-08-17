@@ -89,8 +89,8 @@ Cyber-Threat-Intel/
 
 ---
 
-```diff
-+ ┌──[ developer@sanak3 ]
-+ └─$ whoami 
-+    > Igor Araujo
+```text
+┌──[ developer@sanak3 ]
+└─$ whoami
+    > Igor Araujo
 ```
