@@ -6,6 +6,13 @@ on:
     - cron: '0 6 * * *'
   # Permite disparar manualmente pela aba Actions do GitHub
   workflow_dispatch:
+  # Dispara automaticamente quando houver push com alterações no pipeline
+  push:
+    branches:
+      - main
+    paths:
+      - 'data_pipeline/**'
+      - '.github/workflows/**'
 
 jobs:
   run-etl:
