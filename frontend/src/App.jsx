@@ -3,8 +3,6 @@ import axios from 'axios'
 import {
   BarChart,
   Bar,
-  AreaChart,
-  Area,
   XAxis,
   YAxis,
   Tooltip,
@@ -32,27 +30,6 @@ const CustomSeverityTooltip = ({ active, payload }) => {
   return null
 }
 
-// Tooltip customizado para o gráfico de tendência temporal
-const CustomTimelineTooltip = ({ active, payload }) => {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload
-    return (
-      <div className="custom-recharts-tooltip">
-        <div className="tooltip-title" style={{ color: 'var(--electric-cyan)' }}>
-          ANO DE REFERÊNCIA: {data.ano}
-        </div>
-        <div className="tooltip-value">
-          Total de CVEs: <span>{Number(data.total).toLocaleString('pt-BR')}</span>
-        </div>
-        <div className="tooltip-value" style={{ color: 'var(--critical-red)' }}>
-          Críticas: <span>{Number(data.criticas).toLocaleString('pt-BR')}</span>
-        </div>
-      </div>
-    )
-  }
-  return null
-}
-
 function App() {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
@@ -61,7 +38,6 @@ function App() {
   const [dbConectado, setDbConectado] = useState(false)
   const [analyticsData, setAnalyticsData] = useState({
     stats: null,
-    timeline: [],
     topTecnologias: []
   })
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null)
@@ -117,7 +93,6 @@ function App() {
           const res = analyticsRes.value.data
           setAnalyticsData({
             stats: res.stats || null,
-            timeline: res.timeline || [],
             topTecnologias: res.topTecnologias || []
           })
           setDbConectado(true)
@@ -354,30 +329,30 @@ function App() {
       </section>
 
       {/* --------------------------------------------------------------------
-          3. SEÇÃO DE ANALYTICS DE CTI (3 GRÁFICOS CLEAN)
+          3. SEÇÃO ANALÍTICA DUAL (RETÂNGULO 2x + QUADRADO 1x)
           -------------------------------------------------------------------- */}
-      <section className="analytics-multi-grid">
-        {/* Gráfico 1: Distribuição de Severidade CVSS */}
-        <div className="analytics-card">
+      <section className="analytics-dual-grid">
+        {/* Bloco 1 (Retângulo Largo 2x): Distribuição de Severidade CVSS */}
+        <div className="analytics-card card-wide">
           <div className="analytics-card-header">
             <h3 className="analytics-card-title">
               <span className="section-title-prefix">&gt;_</span>
-              <span>DISTRIBUIÇÃO DE SEVERIDADE CVSS</span>
+              <span>DISTRIBUIÇÃO DE SEVERIDADE CVSS (v3.x / v2.0)</span>
             </h3>
-            <span className="analytics-badge">MATRIZ DE RISCO</span>
+            <span className="analytics-badge">MATRIZ DE RISCO GLOBAL</span>
           </div>
-          <div className="chart-container-inner">
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={dadosSeveridade} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <div className="chart-container-inner chart-wide">
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={dadosSeveridade} margin={{ top: 15, right: 20, left: -10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                 <XAxis
                   dataKey="nome"
                   stroke="#64748b"
-                  tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}
+                  tick={{ fill: '#94a3b8', fontSize: 12, fontFamily: 'var(--font-mono)' }}
                 />
                 <YAxis
                   stroke="#64748b"
-                  tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}
+                  tick={{ fill: '#94a3b8', fontSize: 12, fontFamily: 'var(--font-mono)' }}
                 />
                 <Tooltip content={<CustomSeverityTooltip />} cursor={{ fill: 'rgba(255, 255, 255, 0.03)' }} />
                 <Bar dataKey="valor" radius={[6, 6, 0, 0]}>
@@ -390,50 +365,8 @@ function App() {
           </div>
         </div>
 
-        {/* Gráfico 2: Evolução Temporal por Ano de CVE */}
-        <div className="analytics-card">
-          <div className="analytics-card-header">
-            <h3 className="analytics-card-title">
-              <span className="section-title-prefix">&gt;_</span>
-              <span>TENDÊNCIA TEMPORAL DE DESCOBERTA</span>
-            </h3>
-            <span className="analytics-badge">POR ANO DE CVE</span>
-          </div>
-          <div className="chart-container-inner">
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={analyticsData.timeline} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--electric-cyan)" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="var(--electric-cyan)" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis
-                  dataKey="ano"
-                  stroke="#64748b"
-                  tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}
-                />
-                <YAxis
-                  stroke="#64748b"
-                  tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}
-                />
-                <Tooltip content={<CustomTimelineTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey="total"
-                  stroke="var(--electric-cyan)"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#areaGradient)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Gráfico 3: Top Tecnologias e Ecossistemas Mais Afetados */}
-        <div className="analytics-card">
+        {/* Bloco 2 (Quadrado 1x): Top Tecnologias e Ecossistemas Mais Afetados */}
+        <div className="analytics-card card-compact">
           <div className="analytics-card-header">
             <h3 className="analytics-card-title">
               <span className="section-title-prefix">&gt;_</span>
