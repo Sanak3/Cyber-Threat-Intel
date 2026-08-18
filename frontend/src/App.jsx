@@ -33,33 +33,49 @@ const CustomChartTooltip = ({ active, payload }) => {
 function App() {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
-  // Estados de dados da API
+  // 1. Estados de Telemetria e Estatísticas Globais (KPIs e Gráficos)
   const [apiStatus, setApiStatus] = useState('VERIFICANDO')
   const [dbConectado, setDbConectado] = useState(false)
   const [estatisticas, setEstatisticas] = useState(null)
-  const [ameacas, setAmeacas] = useState([])
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null)
 
-  // Estados de busca e filtros
-  const [termoBusca, setTermoBusca] = useState('')
-  const [filtroSeveridade, setFiltroSeveridade] = useState('TODOS')
+  // 2. Estados da Tabela Paginada no Servidor (Server-Side)
+  const [ameacas, setAmeacas] = useState([])
+  const [totalRegistros, setTotalRegistros] = useState(0)
+  const [totalPaginas, setTotalPaginas] = useState(1)
+  const [carregandoTabela, setCarregandoTabela] = useState(false)
 
-  // Estados de ordenação e paginação (Otimizado para escala de 10k registros)
-  const [campoOrdenacao, setCampoOrdenacao] = useState('nota_cvss')
-  const [direcaoOrdenacao, setDirecaoOrdenacao] = useState('desc')
+  // 3. Estados de Filtros e Paginação
+  const [termoBusca, setTermoBusca] = useState('')
+  const [debouncedBusca, setDebouncedBusca] = useState('')
+  const [filtroSeveridade, setFiltroSeveridade] = useState('TODOS')
   const [paginaAtual, setPaginaAtual] = useState(1)
   const [itensPorPagina, setItensPorPagina] = useState(25)
 
-  // Efeito de montagem para carga inicial de dados
+  // ---------------------------------------------------------------------------
+  // EFEITO 1: Debounce de 500ms no termo de busca
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedBusca(termoBusca)
+    }, 500)
+
+    return () => {
+      clearTimeout(handler)
+    }
+  }, [termoBusca])
+
+  // ---------------------------------------------------------------------------
+  // EFEITO 2: Carga de Telemetria e Estatísticas Agregadas para KPIs e Gráficos
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true
 
-    const carregarDadosIniciais = async () => {
+    const carregarEstatisticas = async () => {
       try {
-        const [healthRes, statsRes, threatsRes] = await Promise.allSettled([
+        const [healthRes, statsRes] = await Promise.allSettled([
           axios.get(`${API_URL}/api/health`),
-          axios.get(`${API_URL}/api/threats/stats`),
-          axios.get(`${API_URL}/api/threats?limit=1000`)
+          axios.get(`${API_URL}/api/threats/stats`)
         ])
 
         if (!isMounted) return
@@ -77,88 +93,76 @@ function App() {
           setDbConectado(false)
         }
 
-        if (threatsRes.status === 'fulfilled') {
-          const dadosRecebidos = Array.isArray(threatsRes.value.data)
-            ? threatsRes.value.data
-            : (threatsRes.value.data?.dados || [])
-          setAmeacas(dadosRecebidos)
-        }
-
         setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
       } catch (err) {
-        console.error('[-] Erro ao carregar dados do dashboard:', err)
+        console.error('[-] Erro ao carregar estatísticas do SOC:', err)
       }
     }
 
-    carregarDadosIniciais()
+    carregarEstatisticas()
 
     return () => {
       isMounted = false
     }
   }, [API_URL])
 
-  // Filtragem dinâmica em tempo real (Todas as categorias: CRITICAL, HIGH, MEDIUM, LOW)
-  const ameacasFiltradas = useMemo(() => {
-    return ameacas.filter(item => {
-      const termo = termoBusca.toLowerCase().trim()
-      const cveMatch = item.cve_id ? item.cve_id.toLowerCase().includes(termo) : false
-      const descMatch = item.descricao ? item.descricao.toLowerCase().includes(termo) : false
-      const sevMatch = item.severidade ? item.severidade.toLowerCase().includes(termo) : false
+  // ---------------------------------------------------------------------------
+  // EFEITO 3: Consulta Server-Side de Ameaças (Paginação e Busca no PostgreSQL)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    let isMounted = true
+    const controller = new AbortController()
 
-      const matchesBusca = !termo || cveMatch || descMatch || sevMatch
+    const carregarAmeacasPaginadas = async () => {
+      setCarregandoTabela(true)
+      try {
+        const params = {
+          page: paginaAtual,
+          limit: itensPorPagina
+        }
 
-      const matchesSeveridade =
-        filtroSeveridade === 'TODOS' ||
-        (item.severidade && item.severidade.toUpperCase() === filtroSeveridade)
+        if (debouncedBusca.trim()) {
+          params.search = debouncedBusca.trim()
+        }
 
-      return matchesBusca && matchesSeveridade
-    })
-  }, [ameacas, termoBusca, filtroSeveridade])
+        if (filtroSeveridade && filtroSeveridade !== 'TODOS') {
+          params.severity = filtroSeveridade
+        }
 
-  // Ordenação dos dados filtrados
-  const ameacasOrdenadas = useMemo(() => {
-    const ordenadas = [...ameacasFiltradas]
-    ordenadas.sort((a, b) => {
-      let valA = a[campoOrdenacao]
-      let valB = b[campoOrdenacao]
+        const res = await axios.get(`${API_URL}/api/threats`, {
+          params,
+          signal: controller.signal
+        })
 
-      if (campoOrdenacao === 'nota_cvss') {
-        valA = Number(valA) || 0
-        valB = Number(valB) || 0
-      } else if (campoOrdenacao === 'data_extracao') {
-        valA = new Date(valA || 0).getTime()
-        valB = new Date(valB || 0).getTime()
-      } else {
-        valA = String(valA || '').toLowerCase()
-        valB = String(valB || '').toLowerCase()
+        if (!isMounted) return
+
+        const dadosResposta = res.data
+        if (dadosResposta) {
+          setAmeacas(dadosResposta.dados || [])
+          setTotalRegistros(Number(dadosResposta.total) || 0)
+          setTotalPaginas(Math.max(1, Number(dadosResposta.totalPaginas) || 1))
+        }
+      } catch (err) {
+        if (axios.isCancel(err) || err.name === 'CanceledError') {
+          return
+        }
+        console.error('[-] Erro ao carregar ameaças paginadas da API:', err)
+      } finally {
+        if (isMounted) {
+          setCarregandoTabela(false)
+        }
       }
-
-      if (valA < valB) return direcaoOrdenacao === 'asc' ? -1 : 1
-      if (valA > valB) return direcaoOrdenacao === 'asc' ? 1 : -1
-      return 0
-    })
-    return ordenadas
-  }, [ameacasFiltradas, campoOrdenacao, direcaoOrdenacao])
-
-  // Paginação dos dados com clamp seguro
-  const totalPaginas = Math.max(1, Math.ceil(ameacasOrdenadas.length / itensPorPagina))
-  const paginaSegura = Math.min(Math.max(1, paginaAtual), totalPaginas)
-  const indiceInicio = (paginaSegura - 1) * itensPorPagina
-  const ameacasPaginadas = useMemo(() => {
-    return ameacasOrdenadas.slice(indiceInicio, indiceInicio + itensPorPagina)
-  }, [ameacasOrdenadas, indiceInicio, itensPorPagina])
-
-  // Função para alternar ordenação por coluna
-  const alternarOrdenacao = (campo) => {
-    if (campoOrdenacao === campo) {
-      setDirecaoOrdenacao(prev => (prev === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setCampoOrdenacao(campo)
-      setDirecaoOrdenacao(campo === 'nota_cvss' ? 'desc' : 'asc')
     }
-  }
 
-  // Formatação dos dados para o gráfico Recharts
+    carregarAmeacasPaginadas()
+
+    return () => {
+      isMounted = false
+      controller.abort()
+    }
+  }, [API_URL, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade])
+
+  // Formatação dos dados consolidados para o gráfico Recharts
   const dadosGrafico = useMemo(() => {
     if (!estatisticas) return []
     return [
@@ -215,6 +219,10 @@ function App() {
     }
   }
 
+  // Cálculos de índices para a barra de paginação
+  const indiceInicio = totalRegistros === 0 ? 0 : (paginaAtual - 1) * itensPorPagina + 1
+  const indiceFim = Math.min(paginaAtual * itensPorPagina, totalRegistros)
+
   return (
     <div className="soc-dashboard-container">
       {/* --------------------------------------------------------------------
@@ -230,7 +238,7 @@ function App() {
             <span className="brand-tag volume-tag">10.000+ CVEs</span>
           </h1>
           <p className="brand-subtitle">
-            &gt;_ NIST NVD Large-Scale Ingestion Feed &amp; CVSS Threat Matrix
+            &gt;_ NIST NVD Large-Scale Server-Side Feed &amp; CVSS Threat Matrix
           </p>
         </div>
 
@@ -351,7 +359,7 @@ function App() {
       </section>
 
       {/* --------------------------------------------------------------------
-          4. CAMPO DE BUSCA E FILTROS EM TEMPO REAL (TERMINAL STYLE)
+          4. CAMPO DE BUSCA E FILTROS EM TEMPO REAL COM DEBOUNCE (500ms)
           -------------------------------------------------------------------- */}
       <section className="filter-panel">
         <div className="search-terminal-box">
@@ -389,7 +397,7 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              TODOS <span className="pill-count">{ameacas.length}</span>
+              TODOS <span className="pill-count">{estatisticas ? Number(estatisticas.total_ameacas).toLocaleString('pt-BR') : '---'}</span>
             </button>
             <button
               className={`filter-pill pill-critical ${filtroSeveridade === 'CRITICAL' ? 'active' : ''}`}
@@ -398,7 +406,7 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              CRITICAL
+              CRITICAL <span className="pill-count">{estatisticas ? Number(estatisticas.criticas).toLocaleString('pt-BR') : ''}</span>
             </button>
             <button
               className={`filter-pill pill-high ${filtroSeveridade === 'HIGH' ? 'active' : ''}`}
@@ -407,7 +415,7 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              HIGH
+              HIGH <span className="pill-count">{estatisticas ? Number(estatisticas.altas).toLocaleString('pt-BR') : ''}</span>
             </button>
             <button
               className={`filter-pill pill-medium ${filtroSeveridade === 'MEDIUM' ? 'active' : ''}`}
@@ -416,7 +424,7 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              MEDIUM
+              MEDIUM <span className="pill-count">{estatisticas ? Number(estatisticas.medias).toLocaleString('pt-BR') : ''}</span>
             </button>
             <button
               className={`filter-pill pill-low ${filtroSeveridade === 'LOW' ? 'active' : ''}`}
@@ -425,27 +433,33 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              LOW
+              LOW <span className="pill-count">{estatisticas ? Number(estatisticas.baixas).toLocaleString('pt-BR') : ''}</span>
             </button>
           </div>
 
           <div className="filter-stats-text">
-            Exibindo <span className="filter-stats-highlight">{ameacasFiltradas.length}</span> de {ameacas.length} vulnerabilidades carregadas
+            {carregandoTabela ? (
+              <span style={{ color: 'var(--electric-cyan)' }}>Consultando banco de dados...</span>
+            ) : (
+              <span>
+                Exibindo <span className="filter-stats-highlight">{ameacas.length}</span> nesta página (Total filtrado: <span className="filter-stats-highlight">{totalRegistros.toLocaleString('pt-BR')}</span>)
+              </span>
+            )}
           </div>
         </div>
       </section>
 
       {/* --------------------------------------------------------------------
-          5. TABELA DE INTELIGÊNCIA DE AMEAÇAS COM ORDENAÇÃO E PAGINAÇÃO
+          5. TABELA DE INTELIGÊNCIA DE AMEAÇAS (PAGINAÇÃO SERVER-SIDE)
           -------------------------------------------------------------------- */}
       <section className="threat-table-card">
         <div className="section-header">
           <h2 className="section-title">
             <span className="section-title-prefix">&gt;_</span>
-            <span>FEED DE VULNERABILIDADES DETECTADAS (CATÁLOGO COMPLETO)</span>
+            <span>FEED DE VULNERABILIDADES (CATÁLOGO SERVER-SIDE)</span>
           </h2>
           <span className="filter-stats-text">
-            Página <span className="filter-stats-highlight">{paginaSegura}</span> de {totalPaginas}
+            Página <span className="filter-stats-highlight">{paginaAtual}</span> de {totalPaginas}
           </span>
         </div>
 
@@ -453,36 +467,16 @@ function App() {
           <table className="soc-table">
             <thead>
               <tr>
-                <th className="sortable" onClick={() => alternarOrdenacao('cve_id')}>
-                  IDENTIFICADOR
-                  {campoOrdenacao === 'cve_id' && (
-                    <span className="sort-icon">{direcaoOrdenacao === 'asc' ? '▲' : '▼'}</span>
-                  )}
-                </th>
-                <th className="sortable" onClick={() => alternarOrdenacao('nota_cvss')}>
-                  SCORE CVSS
-                  {campoOrdenacao === 'nota_cvss' && (
-                    <span className="sort-icon">{direcaoOrdenacao === 'asc' ? '▲' : '▼'}</span>
-                  )}
-                </th>
-                <th className="sortable" onClick={() => alternarOrdenacao('severidade')}>
-                  SEVERIDADE
-                  {campoOrdenacao === 'severidade' && (
-                    <span className="sort-icon">{direcaoOrdenacao === 'asc' ? '▲' : '▼'}</span>
-                  )}
-                </th>
+                <th>IDENTIFICADOR</th>
+                <th>SCORE CVSS</th>
+                <th>SEVERIDADE</th>
                 <th>DESCRIÇÃO TÉCNICA</th>
-                <th className="sortable" onClick={() => alternarOrdenacao('data_extracao')}>
-                  DATA INGESTÃO
-                  {campoOrdenacao === 'data_extracao' && (
-                    <span className="sort-icon">{direcaoOrdenacao === 'asc' ? '▲' : '▼'}</span>
-                  )}
-                </th>
+                <th>DATA INGESTÃO</th>
               </tr>
             </thead>
             <tbody>
-              {ameacasPaginadas.length > 0 ? (
-                ameacasPaginadas.map((item) => (
+              {ameacas.length > 0 ? (
+                ameacas.map((item) => (
                   <tr key={item.cve_id}>
                     <td className="cve-id-cell">
                       <a
@@ -517,12 +511,18 @@ function App() {
                 <tr>
                   <td colSpan={5}>
                     <div className="table-empty-state">
-                      <div className="empty-state-icon">🔍</div>
+                      <div className="empty-state-icon">
+                        {carregandoTabela ? '⏳' : '🔍'}
+                      </div>
                       <div className="empty-state-text">
-                        NENHUMA VULNERABILIDADE LOCALIZADA
+                        {carregandoTabela
+                          ? 'CARREGANDO VULNERABILIDADES DA API...'
+                          : 'NENHUMA VULNERABILIDADE LOCALIZADA'}
                       </div>
                       <div className="empty-state-subtext">
-                        Tente ajustar o termo digitado no terminal ou selecionar outro filtro de severidade.
+                        {carregandoTabela
+                          ? 'Consultando base de dados do PostgreSQL na AWS RDS'
+                          : 'Tente ajustar o termo digitado no terminal ou selecionar outro filtro de severidade.'}
                       </div>
                     </div>
                   </td>
@@ -532,8 +532,8 @@ function App() {
           </table>
         </div>
 
-        {/* Barra de Paginação */}
-        {ameacasOrdenadas.length > 0 && (
+        {/* Barra de Paginação Server-Side */}
+        {totalRegistros > 0 && (
           <div className="table-pagination-bar">
             <div className="pagination-size-selector">
               <span>Registros por página:</span>
@@ -551,7 +551,7 @@ function App() {
                 <option value={100}>100</option>
               </select>
               <span>
-                (Mostrando {indiceInicio + 1} - {Math.min(indiceInicio + itensPorPagina, ameacasOrdenadas.length)} de {ameacasOrdenadas.length})
+                (Mostrando {indiceInicio} - {indiceFim} de {totalRegistros.toLocaleString('pt-BR')})
               </span>
             </div>
 
@@ -559,26 +559,26 @@ function App() {
               <button
                 className="btn-page"
                 onClick={() => setPaginaAtual(1)}
-                disabled={paginaSegura === 1}
+                disabled={paginaAtual <= 1 || carregandoTabela}
                 title="Primeira página"
               >
                 &laquo;
               </button>
               <button
                 className="btn-page"
-                onClick={() => setPaginaAtual(Math.max(1, paginaSegura - 1))}
-                disabled={paginaSegura === 1}
+                onClick={() => setPaginaAtual(prev => Math.max(1, prev - 1))}
+                disabled={paginaAtual <= 1 || carregandoTabela}
                 title="Página anterior"
               >
                 &lsaquo; Anterior
               </button>
               <span className="pagination-page-indicator">
-                {paginaSegura} / {totalPaginas}
+                {paginaAtual} / {totalPaginas}
               </span>
               <button
                 className="btn-page"
-                onClick={() => setPaginaAtual(Math.min(totalPaginas, paginaSegura + 1))}
-                disabled={paginaSegura === totalPaginas}
+                onClick={() => setPaginaAtual(prev => Math.min(totalPaginas, prev + 1))}
+                disabled={paginaAtual >= totalPaginas || carregandoTabela}
                 title="Próxima página"
               >
                 Próxima &rsaquo;
@@ -586,7 +586,7 @@ function App() {
               <button
                 className="btn-page"
                 onClick={() => setPaginaAtual(totalPaginas)}
-                disabled={paginaSegura === totalPaginas}
+                disabled={paginaAtual >= totalPaginas || carregandoTabela}
                 title="Última página"
               >
                 &raquo;
@@ -601,7 +601,7 @@ function App() {
           -------------------------------------------------------------------- */}
       <footer className="soc-footer">
         <div>
-          CYBER THREAT INTEL SYSTEM // <span className="footer-tech">BY SANAK3 // ESCALA 10.000+ CVEs // PYTHON NUMPY + AWS RDS + NODE EXPRESS + REACT 19</span>
+          CYBER THREAT INTEL SYSTEM // <span className="footer-tech">BY SANAK3 // SERVER-SIDE PAGINATION // PYTHON NUMPY + AWS RDS + NODE EXPRESS + REACT 19</span>
         </div>
         <div>
           STATUS DA BASE: <span style={{ color: 'var(--neon-green)' }}>SYNC DIÁRIO ATIVO</span>
