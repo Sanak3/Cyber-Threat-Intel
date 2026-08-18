@@ -68,7 +68,7 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Cyber Threat API rodando com sucesso!' });
 });
 
-// Rota 1: Resumo Estatístico Consolidado
+// Rota 1: Resumo Estatístico Consolidado (Legado & Leve)
 app.get('/api/threats/stats', async (req, res) => {
     try {
         const query = `
@@ -89,7 +89,74 @@ app.get('/api/threats/stats', async (req, res) => {
     }
 });
 
-// Rota 2: Lista das Maiores Ameaças Críticas / Altas (Score >= 7.0)
+// Rota 2: Analytics Avançado de CTI (Severidade, Tendência Temporal e Top Tecnologias)
+app.get('/api/threats/analytics', async (req, res) => {
+    try {
+        const statsQuery = `
+            SELECT 
+                COUNT(*) as total_ameacas,
+                SUM(CASE WHEN nota_cvss >= 9.0 THEN 1 ELSE 0 END) as criticas,
+                SUM(CASE WHEN nota_cvss >= 7.0 AND nota_cvss < 9.0 THEN 1 ELSE 0 END) as altas,
+                SUM(CASE WHEN nota_cvss >= 4.0 AND nota_cvss < 7.0 THEN 1 ELSE 0 END) as medias,
+                SUM(CASE WHEN nota_cvss > 0.0 AND nota_cvss < 4.0 THEN 1 ELSE 0 END) as baixas,
+                MAX(nota_cvss) as pior_risco,
+                ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2) as media_score
+            FROM threats;
+        `;
+
+        const timelineQuery = `
+            SELECT 
+                substring(cve_id from 'CVE-([0-9]{4})-') as ano,
+                COUNT(*) as total,
+                SUM(CASE WHEN nota_cvss >= 9.0 THEN 1 ELSE 0 END) as criticas
+            FROM threats
+            WHERE cve_id ~ '^CVE-[0-9]{4}-'
+            GROUP BY ano
+            HAVING substring(cve_id from 'CVE-([0-9]{4})-') >= '2016'
+            ORDER BY ano ASC;
+        `;
+
+        const techQuery = `
+            SELECT 
+                SUM(CASE WHEN descricao ILIKE '%windows%' OR descricao ILIKE '%microsoft%' THEN 1 ELSE 0 END) as microsoft,
+                SUM(CASE WHEN descricao ILIKE '%linux%' OR descricao ILIKE '%kernel%' THEN 1 ELSE 0 END) as linux,
+                SUM(CASE WHEN descricao ILIKE '%android%' OR descricao ILIKE '%google%' THEN 1 ELSE 0 END) as google,
+                SUM(CASE WHEN descricao ILIKE '%apple%' OR descricao ILIKE '%macos%' OR descricao ILIKE '%ios%' THEN 1 ELSE 0 END) as apple,
+                SUM(CASE WHEN descricao ILIKE '%apache%' THEN 1 ELSE 0 END) as apache,
+                SUM(CASE WHEN descricao ILIKE '%cisco%' THEN 1 ELSE 0 END) as cisco,
+                SUM(CASE WHEN descricao ILIKE '%oracle%' THEN 1 ELSE 0 END) as oracle
+            FROM threats;
+        `;
+
+        const [statsResult, timelineResult, techResult] = await Promise.all([
+            pool.query(statsQuery),
+            pool.query(timelineQuery),
+            pool.query(techQuery)
+        ]);
+
+        const rawTech = techResult.rows[0] || {};
+        const topTecnologias = [
+            { nome: 'Microsoft / Windows', total: parseInt(rawTech.microsoft || 0, 10), cor: '#00d4ff' },
+            { nome: 'Linux / Kernel', total: parseInt(rawTech.linux || 0, 10), cor: '#00ff88' },
+            { nome: 'Google / Android', total: parseInt(rawTech.google || 0, 10), cor: '#fbbf24' },
+            { nome: 'Apple / iOS / macOS', total: parseInt(rawTech.apple || 0, 10), cor: '#a855f7' },
+            { nome: 'Apache Foundation', total: parseInt(rawTech.apache || 0, 10), cor: '#f97316' },
+            { nome: 'Cisco Systems', total: parseInt(rawTech.cisco || 0, 10), cor: '#06b6d4' },
+            { nome: 'Oracle', total: parseInt(rawTech.oracle || 0, 10), cor: '#ef4444' }
+        ].sort((a, b) => b.total - a.total);
+
+        res.json({
+            stats: statsResult.rows[0],
+            timeline: timelineResult.rows,
+            topTecnologias
+        });
+    } catch (error) {
+        console.error("[-] Erro ao buscar analytics de inteligência:", error.message);
+        res.status(500).json({ error: "Erro interno no servidor" });
+    }
+});
+
+// Rota 3: Lista das Maiores Ameaças Críticas / Altas (Score >= 7.0)
 app.get('/api/threats/critical', async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
@@ -108,22 +175,28 @@ app.get('/api/threats/critical', async (req, res) => {
     }
 });
 
-// Rota 3: Consulta Paginada e Busca Segura no Catálogo Completo (Todas as severidades)
+// Rota 4: Consulta Paginada de Alta Performance com Full-Text Search (GIN) e Filtros
 app.get('/api/threats', async (req, res) => {
     try {
         const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 1000);
         const offset = (page - 1) * limit;
 
-        const search = req.query.search ? `%${String(req.query.search).trim()}%` : null;
+        const rawSearch = req.query.search ? String(req.query.search).trim() : null;
         const severity = req.query.severity && req.query.severity !== 'TODOS' ? String(req.query.severity).toUpperCase() : null;
 
         let whereClauses = [];
         let queryParams = [];
 
-        if (search) {
-            queryParams.push(search);
-            whereClauses.push(`(cve_id ILIKE $${queryParams.length} OR descricao ILIKE $${queryParams.length})`);
+        if (rawSearch) {
+            queryParams.push(rawSearch);
+            const p = queryParams.length;
+            // Busca Híbrida: Full-Text Search no GIN Index + ILIKE para substrings parciais de CVE IDs
+            whereClauses.push(`(
+                cve_id ILIKE '%' || $${p} || '%'
+                OR to_tsvector('english', coalesce(descricao, '')) @@ plainto_tsquery('english', $${p})
+                OR descricao ILIKE '%' || $${p} || '%'
+            )`);
         }
 
         if (severity) {
@@ -138,7 +211,7 @@ app.get('/api/threats', async (req, res) => {
         const countResult = await pool.query(countQuery, queryParams);
         const totalRegistros = parseInt(countResult.rows[0].total, 10);
 
-        // Busca paginada
+        // Busca paginada com ordenação otimizada por índice
         queryParams.push(limit);
         const limitParamIndex = queryParams.length;
         queryParams.push(offset);
@@ -167,5 +240,5 @@ app.get('/api/threats', async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [CORS Vercel Previews Ativo]`);
+    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Full-Text Search & Analytics Ativos]`);
 });

@@ -3,6 +3,8 @@ import axios from 'axios'
 import {
   BarChart,
   Bar,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   Tooltip,
@@ -12,8 +14,8 @@ import {
 } from 'recharts'
 import './App.css'
 
-// Tooltip customizado com estética Cyber/SOC Dark
-const CustomChartTooltip = ({ active, payload }) => {
+// Tooltip customizado para o gráfico de severidade
+const CustomSeverityTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload
     return (
@@ -22,7 +24,28 @@ const CustomChartTooltip = ({ active, payload }) => {
           {data.nome.toUpperCase()} ({data.faixa})
         </div>
         <div className="tooltip-value">
-          Total de Ameaças: <span>{data.valor.toLocaleString('pt-BR')}</span>
+          Total de Ameaças: <span>{Number(data.valor).toLocaleString('pt-BR')}</span>
+        </div>
+      </div>
+    )
+  }
+  return null
+}
+
+// Tooltip customizado para o gráfico de tendência temporal
+const CustomTimelineTooltip = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload
+    return (
+      <div className="custom-recharts-tooltip">
+        <div className="tooltip-title" style={{ color: 'var(--electric-cyan)' }}>
+          ANO DE REFERÊNCIA: {data.ano}
+        </div>
+        <div className="tooltip-value">
+          Total de CVEs: <span>{Number(data.total).toLocaleString('pt-BR')}</span>
+        </div>
+        <div className="tooltip-value" style={{ color: 'var(--critical-red)' }}>
+          Críticas: <span>{Number(data.criticas).toLocaleString('pt-BR')}</span>
         </div>
       </div>
     )
@@ -33,10 +56,14 @@ const CustomChartTooltip = ({ active, payload }) => {
 function App() {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
-  // 1. Estados de Telemetria e Estatísticas Globais (KPIs e Gráficos)
+  // 1. Estados de Telemetria e Analytics Globais
   const [apiStatus, setApiStatus] = useState('VERIFICANDO')
   const [dbConectado, setDbConectado] = useState(false)
-  const [estatisticas, setEstatisticas] = useState(null)
+  const [analyticsData, setAnalyticsData] = useState({
+    stats: null,
+    timeline: [],
+    topTecnologias: []
+  })
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null)
 
   // 2. Estados da Tabela Paginada no Servidor (Server-Side)
@@ -53,7 +80,7 @@ function App() {
   const [itensPorPagina, setItensPorPagina] = useState(25)
 
   // ---------------------------------------------------------------------------
-  // EFEITO 1: Debounce de 500ms no termo de busca
+  // EFEITO 1: Debounce de 500ms no termo de busca (Full-Text Search)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -66,16 +93,16 @@ function App() {
   }, [termoBusca])
 
   // ---------------------------------------------------------------------------
-  // EFEITO 2: Carga de Telemetria e Estatísticas Agregadas para KPIs e Gráficos
+  // EFEITO 2: Carga de Telemetria e Analytics Avançado de CTI
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true
 
-    const carregarEstatisticas = async () => {
+    const carregarAnalytics = async () => {
       try {
-        const [healthRes, statsRes] = await Promise.allSettled([
+        const [healthRes, analyticsRes] = await Promise.allSettled([
           axios.get(`${API_URL}/api/health`),
-          axios.get(`${API_URL}/api/threats/stats`)
+          axios.get(`${API_URL}/api/threats/analytics`)
         ])
 
         if (!isMounted) return
@@ -86,8 +113,13 @@ function App() {
           setApiStatus('OFFLINE')
         }
 
-        if (statsRes.status === 'fulfilled') {
-          setEstatisticas(statsRes.value.data)
+        if (analyticsRes.status === 'fulfilled' && analyticsRes.value.data) {
+          const res = analyticsRes.value.data
+          setAnalyticsData({
+            stats: res.stats || null,
+            timeline: res.timeline || [],
+            topTecnologias: res.topTecnologias || []
+          })
           setDbConectado(true)
         } else {
           setDbConectado(false)
@@ -95,11 +127,11 @@ function App() {
 
         setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
       } catch (err) {
-        console.error('[-] Erro ao carregar estatísticas do SOC:', err)
+        console.error('[-] Erro ao carregar analytics do SOC:', err)
       }
     }
 
-    carregarEstatisticas()
+    carregarAnalytics()
 
     return () => {
       isMounted = false
@@ -107,7 +139,7 @@ function App() {
   }, [API_URL])
 
   // ---------------------------------------------------------------------------
-  // EFEITO 3: Consulta Server-Side de Ameaças (Paginação e Busca no PostgreSQL)
+  // EFEITO 3: Consulta Server-Side com GIN Full-Text Search e Paginação
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true
@@ -146,7 +178,7 @@ function App() {
         if (axios.isCancel(err) || err.name === 'CanceledError') {
           return
         }
-        console.error('[-] Erro ao carregar ameaças paginadas da API:', err)
+        console.error('[-] Erro ao carregar catálogo da API:', err)
       } finally {
         if (isMounted) {
           setCarregandoTabela(false)
@@ -162,36 +194,43 @@ function App() {
     }
   }, [API_URL, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade])
 
-  // Formatação dos dados consolidados para o gráfico Recharts
-  const dadosGrafico = useMemo(() => {
-    if (!estatisticas) return []
+  // Dados consolidados para o gráfico de severidade
+  const dadosSeveridade = useMemo(() => {
+    const s = analyticsData.stats
+    if (!s) return []
     return [
       {
         nome: 'Crítico',
         faixa: 'CVSS 9.0 - 10.0',
-        valor: Number(estatisticas.criticas) || 0,
+        valor: Number(s.criticas) || 0,
         cor: 'var(--critical-red)'
       },
       {
         nome: 'Alto',
         faixa: 'CVSS 7.0 - 8.9',
-        valor: Number(estatisticas.altas) || 0,
+        valor: Number(s.altas) || 0,
         cor: 'var(--high-orange)'
       },
       {
         nome: 'Médio',
         faixa: 'CVSS 4.0 - 6.9',
-        valor: Number(estatisticas.medias) || 0,
+        valor: Number(s.medias) || 0,
         cor: 'var(--medium-yellow)'
       },
       {
         nome: 'Baixo',
         faixa: 'CVSS 0.1 - 3.9',
-        valor: Number(estatisticas.baixas) || 0,
+        valor: Number(s.baixas) || 0,
         cor: 'var(--neon-green)'
       }
     ]
-  }, [estatisticas])
+  }, [analyticsData.stats])
+
+  // Maior valor entre as tecnologias para escala percentual da barra
+  const maxTechCount = useMemo(() => {
+    if (!analyticsData.topTecnologias.length) return 1
+    return Math.max(...analyticsData.topTecnologias.map(t => t.total), 1)
+  }, [analyticsData.topTecnologias])
 
   // Helper para obter a classe de severidade do score CVSS
   const getScoreClass = (score) => {
@@ -219,14 +258,14 @@ function App() {
     }
   }
 
-  // Cálculos de índices para a barra de paginação
+  // Cálculos de paginação
   const indiceInicio = totalRegistros === 0 ? 0 : (paginaAtual - 1) * itensPorPagina + 1
   const indiceFim = Math.min(paginaAtual * itensPorPagina, totalRegistros)
 
   return (
     <div className="soc-dashboard-container">
       {/* --------------------------------------------------------------------
-          1. HEADER & STATUS DE TELEMETRIA
+          1. HEADER & TELEMETRIA LIMPA
           -------------------------------------------------------------------- */}
       <header className="soc-header">
         <div className="header-brand">
@@ -238,19 +277,17 @@ function App() {
             <span className="brand-tag volume-tag">10.000+ CVEs</span>
           </h1>
           <p className="brand-subtitle">
-            &gt;_ NIST NVD Large-Scale Server-Side Feed &amp; CVSS Threat Matrix
+            &gt;_ Full-Text Search Intelligence &amp; Real-Time Threat Telemetry
           </p>
         </div>
 
         <div className="header-telemetry">
-          {/* Status da API Node.js */}
           <div className="status-badge">
             <span className={`led-indicator ${apiStatus === 'ONLINE' ? 'led-green' : 'led-red'}`} />
             <span className="status-label">API EXPRESS:</span>
             <span className="status-value">{apiStatus}</span>
           </div>
 
-          {/* Status do Banco AWS RDS PostgreSQL */}
           <div className="status-badge">
             <span className={`led-indicator ${dbConectado ? 'led-green' : 'led-red'}`} />
             <span className="status-label">AWS RDS PG:</span>
@@ -260,7 +297,7 @@ function App() {
       </header>
 
       {/* --------------------------------------------------------------------
-          2. CARDS DE KPIS (MÉTRICAS CONSOLIDADAS - 10.000+ CVEs)
+          2. CARDS DE KPIS CONSOLIDADOS
           -------------------------------------------------------------------- */}
       <section className="kpi-grid">
         <div className="kpi-card kpi-total">
@@ -269,7 +306,7 @@ function App() {
             <span className="kpi-icon">📦</span>
           </div>
           <div className="kpi-value">
-            {estatisticas ? Number(estatisticas.total_ameacas).toLocaleString('pt-BR') : '---'}
+            {analyticsData.stats ? Number(analyticsData.stats.total_ameacas).toLocaleString('pt-BR') : '---'}
           </div>
           <div className="kpi-footer">
             <span>Base Global NIST NVD</span>
@@ -282,7 +319,7 @@ function App() {
             <span className="kpi-icon">🔥</span>
           </div>
           <div className="kpi-value">
-            {estatisticas ? Number(estatisticas.criticas).toLocaleString('pt-BR') : '---'}
+            {analyticsData.stats ? Number(analyticsData.stats.criticas).toLocaleString('pt-BR') : '---'}
           </div>
           <div className="kpi-footer">
             <span>CVSS Score &ge; 9.0</span>
@@ -295,7 +332,7 @@ function App() {
             <span className="kpi-icon">⚠️</span>
           </div>
           <div className="kpi-value">
-            {estatisticas ? Number(estatisticas.altas).toLocaleString('pt-BR') : '---'}
+            {analyticsData.stats ? Number(analyticsData.stats.altas).toLocaleString('pt-BR') : '---'}
           </div>
           <div className="kpi-footer">
             <span>CVSS Score 7.0 - 8.9</span>
@@ -308,7 +345,7 @@ function App() {
             <span className="kpi-icon">⚡</span>
           </div>
           <div className="kpi-value">
-            {estatisticas?.pior_risco ? Number(estatisticas.pior_risco).toFixed(1) : '0.0'}
+            {analyticsData.stats?.pior_risco ? Number(analyticsData.stats.pior_risco).toFixed(1) : '0.0'}
           </div>
           <div className="kpi-footer">
             <span>Escala Máxima 10.0</span>
@@ -317,38 +354,34 @@ function App() {
       </section>
 
       {/* --------------------------------------------------------------------
-          3. GRÁFICO DE DISTRIBUIÇÃO CVSS (RECHARTS)
+          3. SEÇÃO DE ANALYTICS DE CTI (3 GRÁFICOS CLEAN)
           -------------------------------------------------------------------- */}
-      <section className="analytics-section">
-        <div className="chart-card">
-          <div className="section-header">
-            <h2 className="section-title">
+      <section className="analytics-multi-grid">
+        {/* Gráfico 1: Distribuição de Severidade CVSS */}
+        <div className="analytics-card">
+          <div className="analytics-card-header">
+            <h3 className="analytics-card-title">
               <span className="section-title-prefix">&gt;_</span>
-              <span>MATRIZ DE DISTRIBUIÇÃO DE SEVERIDADE (CVSS v3.x / v2.0)</span>
-            </h2>
-            {ultimaAtualizacao && (
-              <span className="filter-stats-text">
-                Última sincronização: <span className="filter-stats-highlight">{ultimaAtualizacao}</span>
-              </span>
-            )}
+              <span>DISTRIBUIÇÃO DE SEVERIDADE CVSS</span>
+            </h3>
+            <span className="analytics-badge">MATRIZ DE RISCO</span>
           </div>
-
-          <div className="chart-wrapper">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dadosGrafico} margin={{ top: 15, right: 20, left: -15, bottom: 5 }}>
+          <div className="chart-container-inner">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={dadosSeveridade} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                 <XAxis
                   dataKey="nome"
                   stroke="#64748b"
-                  tick={{ fill: '#94a3b8', fontSize: 12, fontFamily: 'var(--font-mono)' }}
+                  tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}
                 />
                 <YAxis
                   stroke="#64748b"
-                  tick={{ fill: '#94a3b8', fontSize: 12, fontFamily: 'var(--font-mono)' }}
+                  tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}
                 />
-                <Tooltip content={<CustomChartTooltip />} cursor={{ fill: 'rgba(255, 255, 255, 0.03)' }} />
+                <Tooltip content={<CustomSeverityTooltip />} cursor={{ fill: 'rgba(255, 255, 255, 0.03)' }} />
                 <Bar dataKey="valor" radius={[6, 6, 0, 0]}>
-                  {dadosGrafico.map((entry, index) => (
+                  {dadosSeveridade.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.cor} />
                   ))}
                 </Bar>
@@ -356,10 +389,84 @@ function App() {
             </ResponsiveContainer>
           </div>
         </div>
+
+        {/* Gráfico 2: Evolução Temporal por Ano de CVE */}
+        <div className="analytics-card">
+          <div className="analytics-card-header">
+            <h3 className="analytics-card-title">
+              <span className="section-title-prefix">&gt;_</span>
+              <span>TENDÊNCIA TEMPORAL DE DESCOBERTA</span>
+            </h3>
+            <span className="analytics-badge">POR ANO DE CVE</span>
+          </div>
+          <div className="chart-container-inner">
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={analyticsData.timeline} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--electric-cyan)" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="var(--electric-cyan)" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis
+                  dataKey="ano"
+                  stroke="#64748b"
+                  tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}
+                />
+                <YAxis
+                  stroke="#64748b"
+                  tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'var(--font-mono)' }}
+                />
+                <Tooltip content={<CustomTimelineTooltip />} />
+                <Area
+                  type="monotone"
+                  dataKey="total"
+                  stroke="var(--electric-cyan)"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#areaGradient)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Gráfico 3: Top Tecnologias e Ecossistemas Mais Afetados */}
+        <div className="analytics-card">
+          <div className="analytics-card-header">
+            <h3 className="analytics-card-title">
+              <span className="section-title-prefix">&gt;_</span>
+              <span>ECOSSISTEMAS MAIS AFETADOS</span>
+            </h3>
+            <span className="analytics-badge">VENDORS / SO</span>
+          </div>
+          <div className="tech-ranking-list">
+            {analyticsData.topTecnologias.map((tech) => {
+              const porcentagem = Math.round((tech.total / maxTechCount) * 100)
+              return (
+                <div key={tech.nome} className="tech-ranking-item">
+                  <div className="tech-ranking-info">
+                    <span className="tech-ranking-name">{tech.nome}</span>
+                    <span className="tech-ranking-count" style={{ color: tech.cor }}>
+                      {tech.total.toLocaleString('pt-BR')} CVEs
+                    </span>
+                  </div>
+                  <div className="tech-progress-bg">
+                    <div
+                      className="tech-progress-fill"
+                      style={{ width: `${porcentagem}%`, backgroundColor: tech.cor }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       </section>
 
       {/* --------------------------------------------------------------------
-          4. CAMPO DE BUSCA E FILTROS EM TEMPO REAL COM DEBOUNCE (500ms)
+          4. CAMPO DE BUSCA FULL-TEXT SEARCH & FILTROS EM TEMPO REAL
           -------------------------------------------------------------------- */}
       <section className="filter-panel">
         <div className="search-terminal-box">
@@ -367,7 +474,7 @@ function App() {
           <input
             type="text"
             className="terminal-input"
-            placeholder="Buscar por CVE (ex: CVE-2024), componente (ex: Apache, Windows, Linux) ou termo técnico..."
+            placeholder="Full-Text Search: digite termo técnico (ex: Remote Code Execution, Buffer Overflow, Apache, Windows)..."
             value={termoBusca}
             onChange={(e) => {
               setTermoBusca(e.target.value)
@@ -397,7 +504,7 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              TODOS <span className="pill-count">{estatisticas ? Number(estatisticas.total_ameacas).toLocaleString('pt-BR') : '---'}</span>
+              TODOS <span className="pill-count">{analyticsData.stats ? Number(analyticsData.stats.total_ameacas).toLocaleString('pt-BR') : '---'}</span>
             </button>
             <button
               className={`filter-pill pill-critical ${filtroSeveridade === 'CRITICAL' ? 'active' : ''}`}
@@ -406,7 +513,7 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              CRITICAL <span className="pill-count">{estatisticas ? Number(estatisticas.criticas).toLocaleString('pt-BR') : ''}</span>
+              CRITICAL <span className="pill-count">{analyticsData.stats ? Number(analyticsData.stats.criticas).toLocaleString('pt-BR') : ''}</span>
             </button>
             <button
               className={`filter-pill pill-high ${filtroSeveridade === 'HIGH' ? 'active' : ''}`}
@@ -415,7 +522,7 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              HIGH <span className="pill-count">{estatisticas ? Number(estatisticas.altas).toLocaleString('pt-BR') : ''}</span>
+              HIGH <span className="pill-count">{analyticsData.stats ? Number(analyticsData.stats.altas).toLocaleString('pt-BR') : ''}</span>
             </button>
             <button
               className={`filter-pill pill-medium ${filtroSeveridade === 'MEDIUM' ? 'active' : ''}`}
@@ -424,7 +531,7 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              MEDIUM <span className="pill-count">{estatisticas ? Number(estatisticas.medias).toLocaleString('pt-BR') : ''}</span>
+              MEDIUM <span className="pill-count">{analyticsData.stats ? Number(analyticsData.stats.medias).toLocaleString('pt-BR') : ''}</span>
             </button>
             <button
               className={`filter-pill pill-low ${filtroSeveridade === 'LOW' ? 'active' : ''}`}
@@ -433,16 +540,16 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              LOW <span className="pill-count">{estatisticas ? Number(estatisticas.baixas).toLocaleString('pt-BR') : ''}</span>
+              LOW <span className="pill-count">{analyticsData.stats ? Number(analyticsData.stats.baixas).toLocaleString('pt-BR') : ''}</span>
             </button>
           </div>
 
           <div className="filter-stats-text">
             {carregandoTabela ? (
-              <span style={{ color: 'var(--electric-cyan)' }}>Consultando banco de dados...</span>
+              <span style={{ color: 'var(--electric-cyan)' }}>Executando Full-Text Search no PostgreSQL...</span>
             ) : (
               <span>
-                Exibindo <span className="filter-stats-highlight">{ameacas.length}</span> nesta página (Total filtrado: <span className="filter-stats-highlight">{totalRegistros.toLocaleString('pt-BR')}</span>)
+                Exibindo <span className="filter-stats-highlight">{ameacas.length}</span> nesta página (Total: <span className="filter-stats-highlight">{totalRegistros.toLocaleString('pt-BR')}</span>)
               </span>
             )}
           </div>
@@ -456,7 +563,7 @@ function App() {
         <div className="section-header">
           <h2 className="section-title">
             <span className="section-title-prefix">&gt;_</span>
-            <span>FEED DE VULNERABILIDADES (CATÁLOGO SERVER-SIDE)</span>
+            <span>FEED DE VULNERABILIDADES (CATÁLOGO DE ALTA PERFORMANCE)</span>
           </h2>
           <span className="filter-stats-text">
             Página <span className="filter-stats-highlight">{paginaAtual}</span> de {totalPaginas}
@@ -516,13 +623,13 @@ function App() {
                       </div>
                       <div className="empty-state-text">
                         {carregandoTabela
-                          ? 'CARREGANDO VULNERABILIDADES DA API...'
+                          ? 'EXECUTANDO CONSULTA NO BANCO DE DADOS...'
                           : 'NENHUMA VULNERABILIDADE LOCALIZADA'}
                       </div>
                       <div className="empty-state-subtext">
                         {carregandoTabela
-                          ? 'Consultando base de dados do PostgreSQL na AWS RDS'
-                          : 'Tente ajustar o termo digitado no terminal ou selecionar outro filtro de severidade.'}
+                          ? 'Processando consulta indexada com GIN no AWS RDS'
+                          : 'Tente ajustar os termos da pesquisa ou selecionar outro filtro de severidade.'}
                       </div>
                     </div>
                   </td>
@@ -601,11 +708,13 @@ function App() {
           -------------------------------------------------------------------- */}
       <footer className="soc-footer">
         <div>
-          CYBER THREAT INTEL SYSTEM // <span className="footer-tech">BY SANAK3 // SERVER-SIDE PAGINATION // PYTHON NUMPY + AWS RDS + NODE EXPRESS + REACT 19</span>
+          CYBER THREAT INTEL // <span className="footer-tech">BY SANAK3 // FULL-TEXT SEARCH GIN // NUMPY + AWS RDS + NODE EXPRESS + REACT 19</span>
         </div>
-        <div>
-          STATUS DA BASE: <span style={{ color: 'var(--neon-green)' }}>SYNC DIÁRIO ATIVO</span>
-        </div>
+        {ultimaAtualizacao && (
+          <div>
+            SINCRONIZAÇÃO: <span style={{ color: 'var(--neon-green)' }}>{ultimaAtualizacao}</span>
+          </div>
+        )}
       </footer>
     </div>
   )

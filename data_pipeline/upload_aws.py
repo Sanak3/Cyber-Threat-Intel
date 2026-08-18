@@ -18,7 +18,7 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
     1. Extração paginada de até N registros da API do NIST NVD.
     2. Transformação e análise de risco matricial com NumPy.
     3. Deduplicação em memória para prevenir conflito de linhas duplicadas no mesmo batch.
-    4. Criação da tabela e índices B-Tree de alta performance no AWS RDS PostgreSQL.
+    4. Criação da tabela e índices de alta performance (B-Tree + GIN Full-Text Search) no AWS RDS PostgreSQL.
     5. Carga massiva em lote via psycopg2.extras.execute_values.
     """
     inicio_total = time.time()
@@ -85,10 +85,11 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         """
         cursor.execute(create_table_query)
 
-        # Criação de índices B-Tree de alta performance para otimizar queries analíticas
+        # Criação de índices B-Tree e GIN Full-Text Search para queries ultra-rápidas
         create_indexes_query = """
         CREATE INDEX IF NOT EXISTS idx_threats_cvss_data ON threats (nota_cvss DESC, data_extracao DESC);
         CREATE INDEX IF NOT EXISTS idx_threats_severidade ON threats (severidade);
+        CREATE INDEX IF NOT EXISTS idx_threats_fts ON threats USING GIN (to_tsvector('english', coalesce(descricao, '')));
         """
         cursor.execute(create_indexes_query)
 
