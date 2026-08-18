@@ -11,25 +11,34 @@ const port = process.env.PORT || 5001;
 app.use(helmet());
 app.disable('x-powered-by');
 
-// 2. Configuração Restritiva e Segura de CORS
-const origensPermitidas = [
+// 2. Configuração Dinâmica de CORS com Suporte a Vercel Previews
+const origensEstaticas = [
     'http://localhost:5173',
     'http://localhost:3000',
-    'https://cyber-threat-intel-three.vercel.app',
     process.env.FRONTEND_URL
 ].filter(Boolean);
 
 const corsOptions = {
     origin: (origin, callback) => {
-        // Permite requisições sem origin (como mobile apps, curl, ferramentas backend) ou da lista autorizada
-        if (!origin || origensPermitidas.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Acesso bloqueado pela política de CORS'));
+        // Permite requisições sem origin (como mobile apps, curl, ferramentas backend)
+        if (!origin) {
+            return callback(null, true);
         }
+
+        // Permite origens locais configuradas
+        if (origensEstaticas.includes(origin)) {
+            return callback(null, true);
+        }
+
+        // Permite qualquer deploy em produção ou preview da Vercel (*.vercel.app)
+        if (/\.vercel\.app$/.test(origin) || origin === 'https://vercel.app') {
+            return callback(null, true);
+        }
+
+        return callback(new Error(`Acesso bloqueado pela política de CORS para a origem: ${origin}`));
     },
     methods: ['GET'],
-    allowedHeaders: ['Content-Type'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400
 };
 
@@ -80,7 +89,7 @@ app.get('/api/threats/stats', async (req, res) => {
     }
 });
 
-// Rota 2: Lista das Maiores Ameaças Críticas / Altas
+// Rota 2: Lista das Maiores Ameaças Críticas / Altas (Score >= 7.0)
 app.get('/api/threats/critical', async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
@@ -99,11 +108,11 @@ app.get('/api/threats/critical', async (req, res) => {
     }
 });
 
-// Rota 3: Consulta Paginada e Busca Segura no Catálogo
+// Rota 3: Consulta Paginada e Busca Segura no Catálogo Completo (Todas as severidades)
 app.get('/api/threats', async (req, res) => {
     try {
         const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 1000);
         const offset = (page - 1) * limit;
 
         const search = req.query.search ? `%${String(req.query.search).trim()}%` : null;
@@ -158,5 +167,5 @@ app.get('/api/threats', async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Protegida com Helmet + RateLimit + CORS]`);
+    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [CORS Vercel Previews Ativo]`);
 });

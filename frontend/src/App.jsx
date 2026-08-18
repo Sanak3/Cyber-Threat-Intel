@@ -37,7 +37,7 @@ function App() {
   const [apiStatus, setApiStatus] = useState('VERIFICANDO')
   const [dbConectado, setDbConectado] = useState(false)
   const [estatisticas, setEstatisticas] = useState(null)
-  const [ameacasCriticas, setAmeacasCriticas] = useState([])
+  const [ameacas, setAmeacas] = useState([])
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null)
 
   // Estados de busca e filtros
@@ -56,10 +56,10 @@ function App() {
 
     const carregarDadosIniciais = async () => {
       try {
-        const [healthRes, statsRes, criticalRes] = await Promise.allSettled([
+        const [healthRes, statsRes, threatsRes] = await Promise.allSettled([
           axios.get(`${API_URL}/api/health`),
           axios.get(`${API_URL}/api/threats/stats`),
-          axios.get(`${API_URL}/api/threats/critical?limit=500`)
+          axios.get(`${API_URL}/api/threats?limit=1000`)
         ])
 
         if (!isMounted) return
@@ -77,8 +77,11 @@ function App() {
           setDbConectado(false)
         }
 
-        if (criticalRes.status === 'fulfilled') {
-          setAmeacasCriticas(criticalRes.value.data || [])
+        if (threatsRes.status === 'fulfilled') {
+          const dadosRecebidos = Array.isArray(threatsRes.value.data)
+            ? threatsRes.value.data
+            : (threatsRes.value.data?.dados || [])
+          setAmeacas(dadosRecebidos)
         }
 
         setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
@@ -94,9 +97,9 @@ function App() {
     }
   }, [API_URL])
 
-  // Filtragem dinâmica em tempo real
+  // Filtragem dinâmica em tempo real (Todas as categorias: CRITICAL, HIGH, MEDIUM, LOW)
   const ameacasFiltradas = useMemo(() => {
-    return ameacasCriticas.filter(item => {
+    return ameacas.filter(item => {
       const termo = termoBusca.toLowerCase().trim()
       const cveMatch = item.cve_id ? item.cve_id.toLowerCase().includes(termo) : false
       const descMatch = item.descricao ? item.descricao.toLowerCase().includes(termo) : false
@@ -110,7 +113,7 @@ function App() {
 
       return matchesBusca && matchesSeveridade
     })
-  }, [ameacasCriticas, termoBusca, filtroSeveridade])
+  }, [ameacas, termoBusca, filtroSeveridade])
 
   // Ordenação dos dados filtrados
   const ameacasOrdenadas = useMemo(() => {
@@ -137,7 +140,7 @@ function App() {
     return ordenadas
   }, [ameacasFiltradas, campoOrdenacao, direcaoOrdenacao])
 
-  // Paginação dos dados
+  // Paginação dos dados com clamp seguro
   const totalPaginas = Math.max(1, Math.ceil(ameacasOrdenadas.length / itensPorPagina))
   const paginaSegura = Math.min(Math.max(1, paginaAtual), totalPaginas)
   const indiceInicio = (paginaSegura - 1) * itensPorPagina
@@ -386,7 +389,7 @@ function App() {
                 setPaginaAtual(1)
               }}
             >
-              TODOS <span className="pill-count">{ameacasCriticas.length}</span>
+              TODOS <span className="pill-count">{ameacas.length}</span>
             </button>
             <button
               className={`filter-pill pill-critical ${filtroSeveridade === 'CRITICAL' ? 'active' : ''}`}
@@ -427,7 +430,7 @@ function App() {
           </div>
 
           <div className="filter-stats-text">
-            Exibindo <span className="filter-stats-highlight">{ameacasFiltradas.length}</span> de {ameacasCriticas.length} vulnerabilidades carregadas
+            Exibindo <span className="filter-stats-highlight">{ameacasFiltradas.length}</span> de {ameacas.length} vulnerabilidades carregadas
           </div>
         </div>
       </section>
@@ -439,7 +442,7 @@ function App() {
         <div className="section-header">
           <h2 className="section-title">
             <span className="section-title-prefix">&gt;_</span>
-            <span>FEED DE VULNERABILIDADES CRÍTICAS / ALTAS DETECTADAS</span>
+            <span>FEED DE VULNERABILIDADES DETECTADAS (CATÁLOGO COMPLETO)</span>
           </h2>
           <span className="filter-stats-text">
             Página <span className="filter-stats-highlight">{paginaSegura}</span> de {totalPaginas}

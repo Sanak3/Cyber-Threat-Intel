@@ -17,7 +17,9 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
     Executa o pipeline ETL ponta a ponta:
     1. Extração paginada de até N registros da API do NIST NVD.
     2. Transformação e análise de risco matricial com NumPy.
-    3. Carga massiva em lote via psycopg2.extras.execute_values no AWS RDS PostgreSQL.
+    3. Deduplicação em memória para prevenir conflito de linhas duplicadas no mesmo batch.
+    4. Criação da tabela e índices B-Tree de alta performance no AWS RDS PostgreSQL.
+    5. Carga massiva em lote via psycopg2.extras.execute_values.
     """
     inicio_total = time.time()
     print("=" * 65)
@@ -36,7 +38,15 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         print("[-] [ETL Load] Nenhuma vulnerabilidade processada para upload.")
         return False
 
-    # 3. Preparação das tuplas para inserção em lote
+    # 3. Deduplicação em memória por id_cve (Impede erro de colisão no mesmo comando ON CONFLICT)
+    mapa_dedup = {item["id_cve"]: item for item in vulnerabilidades if item.get("id_cve")}
+    vulnerabilidades_unicas = list(mapa_dedup.values())
+    total_duplicados = len(vulnerabilidades) - len(vulnerabilidades_unicas)
+
+    if total_duplicados > 0:
+        print(f"[!] [ETL Load] Deduplicação em memória: {total_duplicados:,} CVEs repetidos descartados ({len(vulnerabilidades_unicas):,} únicos para gravação).")
+
+    # 4. Preparação das tuplas para inserção em lote
     registros_tuplas = [
         (
             item["id_cve"],
@@ -44,10 +54,10 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
             float(item["nota_cvss"]),
             item["severidade"]
         )
-        for item in vulnerabilidades
+        for item in vulnerabilidades_unicas
     ]
 
-    # 4. Conexão e Carga no AWS RDS PostgreSQL
+    # 5. Conexão e Carga no AWS RDS PostgreSQL
     conn = None
     cursor = None
     try:
@@ -75,6 +85,13 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         """
         cursor.execute(create_table_query)
 
+        # Criação de índices B-Tree de alta performance para otimizar queries analíticas
+        create_indexes_query = """
+        CREATE INDEX IF NOT EXISTS idx_threats_cvss_data ON threats (nota_cvss DESC, data_extracao DESC);
+        CREATE INDEX IF NOT EXISTS idx_threats_severidade ON threats (severidade);
+        """
+        cursor.execute(create_indexes_query)
+
         # Query de Upsert em lote de alta performance
         upsert_query = """
         INSERT INTO threats (cve_id, descricao, nota_cvss, severidade)
@@ -86,7 +103,7 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
             data_extracao = CURRENT_TIMESTAMP;
         """
 
-        print(f"[+] [ETL Load] Gravando {len(registros_tuplas):,} registros via execute_values (lotes de {batch_size:,})...")
+        print(f"[+] [ETL Load] Gravando {len(registros_tuplas):,} registros únicos via execute_values (lotes de {batch_size:,})...")
         inicio_banco = time.time()
 
         execute_values(
