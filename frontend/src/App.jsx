@@ -483,9 +483,9 @@ function App() {
                   <tr key={item.cve_id}>
                     <td className="cve-id-cell">
                       <a
-                        href={`https://nvd.nist.gov/vuln/detail/${item.cve_id}`}
+                        href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(item.cve_id)}`}
                         target="_blank"
-                        rel="noreferrer"
+                        rel="noopener noreferrer"
                         title="Abrir detalhes no NIST NVD"
                       >
                         <span>{item.cve_id}</span>

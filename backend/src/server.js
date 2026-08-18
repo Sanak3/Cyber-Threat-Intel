@@ -1,20 +1,65 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const pool = require('./db_connect');
 
 const app = express();
 const port = process.env.PORT || 5001;
 
-// Middlewares
-app.use(cors());
-app.use(express.json());
+// 1. Headers de Segurança HTTP e Remoção de Fingerprint
+app.use(helmet());
+app.disable('x-powered-by');
+
+// 2. Configuração Restritiva e Segura de CORS
+const origensPermitidas = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://cyber-threat-intel-three.vercel.app',
+    process.env.FRONTEND_URL
+].filter(Boolean);
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        // Permite requisições sem origin (como mobile apps, curl, ferramentas backend) ou da lista autorizada
+        if (!origin || origensPermitidas.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Acesso bloqueado pela política de CORS'));
+        }
+    },
+    methods: ['GET'],
+    allowedHeaders: ['Content-Type'],
+    maxAge: 86400
+};
+
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '50kb' }));
+
+// 3. Rate Limiting para Proteção contra DoS / Abuso de Recursos
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // Janela de 15 minutos
+    max: 300, // Limite de 300 requisições por IP por janela
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        status: 429,
+        error: 'Muitas requisições originadas deste IP. Tente novamente em alguns minutos.'
+    }
+});
+
+app.use('/api/', apiLimiter);
+
+// -----------------------------------------------------------------------------
+// ROTAS DA API
+// -----------------------------------------------------------------------------
 
 // Rota de Healthcheck
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Cyber Threat API rodando com sucesso!' });
 });
 
-// Rota 1: Resumo Estatístico Consolidado (10k+ CVEs)
+// Rota 1: Resumo Estatístico Consolidado
 app.get('/api/threats/stats', async (req, res) => {
     try {
         const query = `
@@ -35,7 +80,7 @@ app.get('/api/threats/stats', async (req, res) => {
     }
 });
 
-// Rota 2: Lista das Maiores Ameaças Críticas / Altas (com suporte a limite dinâmico)
+// Rota 2: Lista das Maiores Ameaças Críticas / Altas
 app.get('/api/threats/critical', async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
@@ -54,15 +99,15 @@ app.get('/api/threats/critical', async (req, res) => {
     }
 });
 
-// Rota 3: Consulta Paginada e Busca no Catálogo Completo (Escala 10.000+ registros)
+// Rota 3: Consulta Paginada e Busca Segura no Catálogo
 app.get('/api/threats', async (req, res) => {
     try {
         const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
         const offset = (page - 1) * limit;
 
-        const search = req.query.search ? `%${req.query.search.trim()}%` : null;
-        const severity = req.query.severity && req.query.severity !== 'TODOS' ? req.query.severity.toUpperCase() : null;
+        const search = req.query.search ? `%${String(req.query.search).trim()}%` : null;
+        const severity = req.query.severity && req.query.severity !== 'TODOS' ? String(req.query.severity).toUpperCase() : null;
 
         let whereClauses = [];
         let queryParams = [];
@@ -79,7 +124,7 @@ app.get('/api/threats', async (req, res) => {
 
         const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-        // Contagem total para metadados de paginação
+        // Contagem total para paginação
         const countQuery = `SELECT COUNT(*) as total FROM threats ${whereSql};`;
         const countResult = await pool.query(countQuery, queryParams);
         const totalRegistros = parseInt(countResult.rows[0].total, 10);
@@ -113,5 +158,5 @@ app.get('/api/threats', async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Escala 10k+]`);
+    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Protegida com Helmet + RateLimit + CORS]`);
 });
