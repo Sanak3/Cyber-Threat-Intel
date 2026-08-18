@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const pool = require('./db_connect');
 
@@ -11,7 +12,10 @@ const port = process.env.PORT || 5001;
 app.use(helmet());
 app.disable('x-powered-by');
 
-// 2. Configuração Dinâmica de CORS com Suporte a Vercel Previews
+// 2. Compressão HTTP Gzip / Deflate para Reduzir Latência de Rede em até 80%
+app.use(compression());
+
+// 3. Configuração Dinâmica de CORS com Suporte a Vercel Previews
 const origensEstaticas = [
     'http://localhost:5173',
     'http://localhost:3000',
@@ -20,21 +24,9 @@ const origensEstaticas = [
 
 const corsOptions = {
     origin: (origin, callback) => {
-        // Permite requisições sem origin (como mobile apps, curl, ferramentas backend)
-        if (!origin) {
-            return callback(null, true);
-        }
-
-        // Permite origens locais configuradas
-        if (origensEstaticas.includes(origin)) {
-            return callback(null, true);
-        }
-
-        // Permite qualquer deploy em produção ou preview da Vercel (*.vercel.app)
-        if (/\.vercel\.app$/.test(origin) || origin === 'https://vercel.app') {
-            return callback(null, true);
-        }
-
+        if (!origin) return callback(null, true);
+        if (origensEstaticas.includes(origin)) return callback(null, true);
+        if (/\.vercel\.app$/.test(origin) || origin === 'https://vercel.app') return callback(null, true);
         return callback(new Error(`Acesso bloqueado pela política de CORS para a origem: ${origin}`));
     },
     methods: ['GET'],
@@ -45,7 +37,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '50kb' }));
 
-// 3. Rate Limiting para Proteção contra DoS / Abuso de Recursos
+// 4. Rate Limiting para Proteção contra DoS / Abuso de Recursos
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // Janela de 15 minutos
     max: 300, // Limite de 300 requisições por IP por janela
@@ -60,6 +52,15 @@ const apiLimiter = rateLimit({
 app.use('/api/', apiLimiter);
 
 // -----------------------------------------------------------------------------
+// CACHE EM MEMÓRIA (TTL CACHE) - Otimização de Performance Sub-Milissegundo
+// -----------------------------------------------------------------------------
+const memoryCache = {
+    analytics: { data: null, expiresAt: 0 },
+    stats: { data: null, expiresAt: 0 }
+};
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos de cache em memória (RAM)
+
+// -----------------------------------------------------------------------------
 // ROTAS DA API
 // -----------------------------------------------------------------------------
 
@@ -68,9 +69,15 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Cyber Threat API rodando com sucesso!' });
 });
 
-// Rota 1: Resumo Estatístico Consolidado (Legado & Leve)
+// Rota 1: Resumo Estatístico Consolidado (Com Cache TTL em RAM)
 app.get('/api/threats/stats', async (req, res) => {
     try {
+        const agora = Date.now();
+        if (memoryCache.stats.data && agora < memoryCache.stats.expiresAt) {
+            res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+            return res.json(memoryCache.stats.data);
+        }
+
         const query = `
             SELECT 
                 COUNT(*) as total_ameacas,
@@ -82,16 +89,28 @@ app.get('/api/threats/stats', async (req, res) => {
             FROM threats;
         `;
         const { rows } = await pool.query(query);
-        res.json(rows[0]);
+        const statsData = rows[0];
+
+        // Atualiza o cache em memória
+        memoryCache.stats = { data: statsData, expiresAt: agora + CACHE_TTL_MS };
+
+        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+        res.json(statsData);
     } catch (error) {
         console.error("[-] Erro ao buscar estatísticas:", error.message);
         res.status(500).json({ error: "Erro interno no servidor" });
     }
 });
 
-// Rota 2: Analytics Avançado de CTI (Severidade, Tendência Temporal e Top Tecnologias)
+// Rota 2: Analytics Avançado de CTI (Severidade e Top Tecnologias com Cache TTL)
 app.get('/api/threats/analytics', async (req, res) => {
     try {
+        const agora = Date.now();
+        if (memoryCache.analytics.data && agora < memoryCache.analytics.expiresAt) {
+            res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+            return res.json(memoryCache.analytics.data);
+        }
+
         const statsQuery = `
             SELECT 
                 COUNT(*) as total_ameacas,
@@ -102,18 +121,6 @@ app.get('/api/threats/analytics', async (req, res) => {
                 MAX(nota_cvss) as pior_risco,
                 ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2) as media_score
             FROM threats;
-        `;
-
-        const timelineQuery = `
-            SELECT 
-                substring(cve_id from 'CVE-([0-9]{4})-') as ano,
-                COUNT(*) as total,
-                SUM(CASE WHEN nota_cvss >= 9.0 THEN 1 ELSE 0 END) as criticas
-            FROM threats
-            WHERE cve_id ~ '^CVE-[0-9]{4}-'
-            GROUP BY ano
-            HAVING substring(cve_id from 'CVE-([0-9]{4})-') >= '2016'
-            ORDER BY ano ASC;
         `;
 
         const techQuery = `
@@ -128,9 +135,8 @@ app.get('/api/threats/analytics', async (req, res) => {
             FROM threats;
         `;
 
-        const [statsResult, timelineResult, techResult] = await Promise.all([
+        const [statsResult, techResult] = await Promise.all([
             pool.query(statsQuery),
-            pool.query(timelineQuery),
             pool.query(techQuery)
         ]);
 
@@ -145,11 +151,16 @@ app.get('/api/threats/analytics', async (req, res) => {
             { nome: 'Oracle', total: parseInt(rawTech.oracle || 0, 10), cor: '#ef4444' }
         ].sort((a, b) => b.total - a.total);
 
-        res.json({
+        const responsePayload = {
             stats: statsResult.rows[0],
-            timeline: timelineResult.rows,
             topTecnologias
-        });
+        };
+
+        // Grava no cache em memória
+        memoryCache.analytics = { data: responsePayload, expiresAt: agora + CACHE_TTL_MS };
+
+        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+        res.json(responsePayload);
     } catch (error) {
         console.error("[-] Erro ao buscar analytics de inteligência:", error.message);
         res.status(500).json({ error: "Erro interno no servidor" });
@@ -168,6 +179,7 @@ app.get('/api/threats/critical', async (req, res) => {
             LIMIT $1;
         `;
         const { rows } = await pool.query(query, [limit]);
+        res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
         res.json(rows);
     } catch (error) {
         console.error("[-] Erro ao buscar ameaças críticas:", error.message);
@@ -226,6 +238,7 @@ app.get('/api/threats', async (req, res) => {
         `;
         const { rows } = await pool.query(dataQuery, queryParams);
 
+        res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=45');
         res.json({
             pagina: page,
             limite: limit,
@@ -240,5 +253,5 @@ app.get('/api/threats', async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Full-Text Search & Analytics Ativos]`);
+    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Compression + RAM Cache + GIN FTS Ativos]`);
 });

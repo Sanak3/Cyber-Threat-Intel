@@ -33,18 +33,45 @@ const CustomSeverityTooltip = ({ active, payload }) => {
 function App() {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
-  // 1. Estados de Telemetria e Analytics Globais
-  const [apiStatus, setApiStatus] = useState('VERIFICANDO')
-  const [dbConectado, setDbConectado] = useState(false)
-  const [analyticsData, setAnalyticsData] = useState({
-    stats: null,
-    topTecnologias: []
+  // 1. Estados de Telemetria e Analytics Globais (Instant Hydration no F5 via sessionStorage)
+  const [apiStatus, setApiStatus] = useState('ONLINE')
+  const [dbConectado, setDbConectado] = useState(true)
+  const [analyticsData, setAnalyticsData] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('cti_analytics_cache')
+      if (cached) return JSON.parse(cached)
+    } catch {
+      // fallback gracioso
+    }
+    return { stats: null, topTecnologias: [] }
   })
-  const [ultimaAtualizacao, setUltimaAtualizacao] = useState(null)
+  const [ultimaAtualizacao, setUltimaAtualizacao] = useState(() => {
+    try {
+      return sessionStorage.getItem('cti_last_sync') || null
+    } catch {
+      return null
+    }
+  })
 
-  // 2. Estados da Tabela Paginada no Servidor (Server-Side)
-  const [ameacas, setAmeacas] = useState([])
-  const [totalRegistros, setTotalRegistros] = useState(0)
+  // 2. Estados da Tabela Paginada no Servidor (Instant Hydration para Página 1)
+  const [ameacas, setAmeacas] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('cti_threats_page1')
+      if (cached) return JSON.parse(cached)
+    } catch {
+      // fallback gracioso
+    }
+    return []
+  })
+  const [totalRegistros, setTotalRegistros] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('cti_total_registros')
+      if (cached) return Number(cached) || 0
+    } catch {
+      return 0
+    }
+    return 0
+  })
   const [totalPaginas, setTotalPaginas] = useState(1)
   const [carregandoTabela, setCarregandoTabela] = useState(false)
 
@@ -56,12 +83,12 @@ function App() {
   const [itensPorPagina, setItensPorPagina] = useState(25)
 
   // ---------------------------------------------------------------------------
-  // EFEITO 1: Debounce de 500ms no termo de busca (Full-Text Search)
+  // EFEITO 1: Debounce de 400ms no termo de busca (Full-Text Search)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedBusca(termoBusca)
-    }, 500)
+    }, 400)
 
     return () => {
       clearTimeout(handler)
@@ -69,7 +96,7 @@ function App() {
   }, [termoBusca])
 
   // ---------------------------------------------------------------------------
-  // EFEITO 2: Carga de Telemetria e Analytics Avançado de CTI
+  // EFEITO 2: Carga em Background de Telemetria e Analytics (Stale-While-Revalidate)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true
@@ -91,16 +118,26 @@ function App() {
 
         if (analyticsRes.status === 'fulfilled' && analyticsRes.value.data) {
           const res = analyticsRes.value.data
-          setAnalyticsData({
+          const novoPayload = {
             stats: res.stats || null,
             topTecnologias: res.topTecnologias || []
-          })
+          }
+          setAnalyticsData(novoPayload)
           setDbConectado(true)
+
+          const horaFormatada = new Date().toLocaleTimeString('pt-BR')
+          setUltimaAtualizacao(horaFormatada)
+
+          // Persiste no cache da sessão para carregamento instantâneo no F5
+          try {
+            sessionStorage.setItem('cti_analytics_cache', JSON.stringify(novoPayload))
+            sessionStorage.setItem('cti_last_sync', horaFormatada)
+          } catch {
+            // ignore storage full
+          }
         } else {
           setDbConectado(false)
         }
-
-        setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
       } catch (err) {
         console.error('[-] Erro ao carregar analytics do SOC:', err)
       }
@@ -114,7 +151,7 @@ function App() {
   }, [API_URL])
 
   // ---------------------------------------------------------------------------
-  // EFEITO 3: Consulta Server-Side com GIN Full-Text Search e Paginação
+  // EFEITO 3: Consulta Server-Side com GIN Full-Text Search e Cache de Página 1
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true
@@ -122,6 +159,7 @@ function App() {
 
     const carregarAmeacasPaginadas = async () => {
       setCarregandoTabela(true)
+
       try {
         const params = {
           page: paginaAtual,
@@ -145,9 +183,23 @@ function App() {
 
         const dadosResposta = res.data
         if (dadosResposta) {
-          setAmeacas(dadosResposta.dados || [])
-          setTotalRegistros(Number(dadosResposta.total) || 0)
-          setTotalPaginas(Math.max(1, Number(dadosResposta.totalPaginas) || 1))
+          const listaRecebida = dadosResposta.dados || []
+          const totalRecebido = Number(dadosResposta.total) || 0
+          const paginasRecebidas = Math.max(1, Number(dadosResposta.totalPaginas) || 1)
+
+          setAmeacas(listaRecebida)
+          setTotalRegistros(totalRecebido)
+          setTotalPaginas(paginasRecebidas)
+
+          // Salva página padrão no cache para acelerar F5
+          if (paginaAtual === 1 && !debouncedBusca && filtroSeveridade === 'TODOS') {
+            try {
+              sessionStorage.setItem('cti_threats_page1', JSON.stringify(listaRecebida))
+              sessionStorage.setItem('cti_total_registros', String(totalRecebido))
+            } catch {
+              // ignore
+            }
+          }
         }
       } catch (err) {
         if (axios.isCancel(err) || err.name === 'CanceledError') {
@@ -252,7 +304,7 @@ function App() {
             <span className="brand-tag volume-tag">10.000+ CVEs</span>
           </h1>
           <p className="brand-subtitle">
-            &gt;_ Full-Text Search Intelligence &amp; Real-Time Threat Telemetry
+            &gt;_ High-Performance GIN Search Intelligence &amp; Real-Time Threat Telemetry
           </p>
         </div>
 
