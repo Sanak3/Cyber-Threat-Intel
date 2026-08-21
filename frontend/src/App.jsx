@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import axios from 'axios'
 import {
   BarChart,
@@ -80,7 +80,18 @@ function App() {
   const [debouncedBusca, setDebouncedBusca] = useState('')
   const [filtroSeveridade, setFiltroSeveridade] = useState('TODOS')
   const [paginaAtual, setPaginaAtual] = useState(1)
-  const [itensPorPagina, setItensPorPagina] = useState(25)
+  const [itensPorPagina, setItensPorPagina] = useState(() => {
+    if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+      return 10
+    }
+    return 25
+  })
+
+  // 4. Estados de Usabilidade e Navegação Mobile
+  const [expandedCves, setExpandedCves] = useState({})
+  const [mostrarGraficosMobile, setMostrarGraficosMobile] = useState(true)
+  const [mostrarVoltarTopo, setMostrarVoltarTopo] = useState(false)
+  const threatTableRef = useRef(null)
 
   // ---------------------------------------------------------------------------
   // EFEITO 1: Debounce de 400ms no termo de busca (Full-Text Search)
@@ -96,7 +107,23 @@ function App() {
   }, [termoBusca])
 
   // ---------------------------------------------------------------------------
-  // EFEITO 2: Carga em Background de Telemetria e Analytics (Stale-While-Revalidate)
+  // EFEITO 2: Listener de Scroll para Botão Flutuante 'Voltar ao Topo'
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 280) {
+        setMostrarVoltarTopo(true)
+      } else {
+        setMostrarVoltarTopo(false)
+      }
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // ---------------------------------------------------------------------------
+  // EFEITO 3: Carga em Background de Telemetria e Analytics (Stale-While-Revalidate)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true
@@ -221,6 +248,44 @@ function App() {
     }
   }, [API_URL, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade])
 
+  // ---------------------------------------------------------------------------
+  // AÇÕES DE NAVEGAÇÃO E EXPANSÃO ACCORDION
+  // ---------------------------------------------------------------------------
+  const mudarPagina = (novaPagina) => {
+    setPaginaAtual(novaPagina)
+    if (threatTableRef.current) {
+      const topOffset = threatTableRef.current.getBoundingClientRect().top + window.scrollY - 20
+      window.scrollTo({ top: topOffset, behavior: 'smooth' })
+    }
+  }
+
+  const irParaTopo = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const toggleExpandCve = (cveId) => {
+    setExpandedCves(prev => ({
+      ...prev,
+      [cveId]: !prev[cveId]
+    }))
+  }
+
+  const expandirTodos = () => {
+    const todos = {}
+    ameacas.forEach(item => {
+      todos[item.cve_id] = true
+    })
+    setExpandedCves(todos)
+  }
+
+  const recolherTodos = () => {
+    setExpandedCves({})
+  }
+
+  const expandedCount = useMemo(() => {
+    return Object.values(expandedCves).filter(Boolean).length
+  }, [expandedCves])
+
   // Dados consolidados para o gráfico de severidade
   const dadosSeveridade = useMemo(() => {
     const s = analyticsData.stats
@@ -324,9 +389,27 @@ function App() {
       </header>
 
       {/* --------------------------------------------------------------------
+          1.1. BARRA DE NAVEGAÇÃO RÁPIDA (ACESSO DIRETO ÀS SEÇÕES)
+          -------------------------------------------------------------------- */}
+      <nav className="soc-quick-nav" aria-label="Navegação Rápida">
+        <a href="#metricas" className="quick-nav-pill">
+          <span>⚡</span> Métricas
+        </a>
+        <a href="#graficos" className="quick-nav-pill">
+          <span>📊</span> Gráficos
+        </a>
+        <a href="#filtros" className="quick-nav-pill">
+          <span>🔍</span> Busca &amp; Filtros
+        </a>
+        <a href="#feed-cves" className="quick-nav-pill">
+          <span>📋</span> Feed CVEs
+        </a>
+      </nav>
+
+      {/* --------------------------------------------------------------------
           2. CARDS DE KPIS CONSOLIDADOS
           -------------------------------------------------------------------- */}
-      <section className="kpi-grid">
+      <section id="metricas" className="kpi-grid">
         <div className="kpi-card kpi-total">
           <div className="kpi-card-header">
             <span className="kpi-title">Total Ingerido</span>
@@ -381,9 +464,34 @@ function App() {
       </section>
 
       {/* --------------------------------------------------------------------
-          3. SEÇÃO ANALÍTICA DUAL (RETÂNGULO 2x + QUADRADO 1x)
+          3. SEÇÃO ANALÍTICA DUAL (COM ACCORDION EM MOBILE PARA REDUZIR SCROLL)
           -------------------------------------------------------------------- */}
-      <section className="analytics-dual-grid">
+      <div 
+        className="mobile-accordion-toggle" 
+        onClick={() => setMostrarGraficosMobile(prev => !prev)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={mostrarGraficosMobile}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setMostrarGraficosMobile(prev => !prev)
+          }
+        }}
+      >
+        <div className="accordion-title">
+          <span>📊</span>
+          <span>ANALYTICS &amp; MATRIZ DE RISCO</span>
+        </div>
+        <span className="accordion-action">
+          {mostrarGraficosMobile ? '▲ Ocultar' : '▼ Visualizar'}
+        </span>
+      </div>
+
+      <section 
+        id="graficos" 
+        className={`analytics-dual-grid ${mostrarGraficosMobile ? '' : 'analytics-hidden-mobile'}`}
+      >
         {/* Bloco 1 (Retângulo Largo 2x): Distribuição de Severidade CVSS */}
         <div className="analytics-card card-wide">
           <div className="analytics-card-header">
@@ -453,7 +561,7 @@ function App() {
       {/* --------------------------------------------------------------------
           4. CAMPO DE BUSCA FULL-TEXT SEARCH & FILTROS EM TEMPO REAL
           -------------------------------------------------------------------- */}
-      <section className="filter-panel">
+      <section id="filtros" className="filter-panel">
         <div className="search-terminal-box">
           <span className="terminal-prompt">&gt;_</span>
           <input
@@ -542,17 +650,55 @@ function App() {
       </section>
 
       {/* --------------------------------------------------------------------
-          5. TABELA DE INTELIGÊNCIA DE AMEAÇAS (PAGINAÇÃO SERVER-SIDE)
+          5. TABELA DE INTELIGÊNCIA DE AMEAÇAS (PAGINAÇÃO DUPLA SERVER-SIDE)
           -------------------------------------------------------------------- */}
-      <section className="threat-table-card">
+      <section id="feed-cves" className="threat-table-card" ref={threatTableRef}>
         <div className="section-header">
-          <h2 className="section-title">
-            <span className="section-title-prefix">&gt;_</span>
-            <span>FEED DE VULNERABILIDADES (CATÁLOGO DE ALTA PERFORMANCE)</span>
-          </h2>
-          <span className="filter-stats-text">
-            Página <span className="filter-stats-highlight">{paginaAtual}</span> de {totalPaginas}
-          </span>
+          <div className="section-header-left">
+            <h2 className="section-title">
+              <span className="section-title-prefix">&gt;_</span>
+              <span>FEED DE VULNERABILIDADES (CATÁLOGO DE ALTA PERFORMANCE)</span>
+            </h2>
+            <span className="filter-stats-text">
+              Página <span className="filter-stats-highlight">{paginaAtual}</span> de {totalPaginas}
+            </span>
+          </div>
+
+          {/* Ações Rápidas de Visualização e Paginação no Topo */}
+          {totalRegistros > 0 && (
+            <div className="section-header-actions">
+              <button
+                type="button"
+                className="btn-view-toggle"
+                onClick={expandedCount > 0 ? recolherTodos : expandirTodos}
+                title={expandedCount > 0 ? 'Recolher detalhes de todos os cards' : 'Expandir detalhes de todos os cards'}
+              >
+                {expandedCount > 0 ? '▲ Recolher Todos' : '▼ Expandir Todos'}
+              </button>
+
+              <div className="top-mini-pagination">
+                <button
+                  className="btn-mini-page"
+                  onClick={() => mudarPagina(Math.max(1, paginaAtual - 1))}
+                  disabled={paginaAtual <= 1 || carregandoTabela}
+                  title="Página anterior"
+                >
+                  ‹
+                </button>
+                <span className="mini-page-indicator">
+                  {paginaAtual}/{totalPaginas}
+                </span>
+                <button
+                  className="btn-mini-page"
+                  onClick={() => mudarPagina(Math.min(totalPaginas, paginaAtual + 1))}
+                  disabled={paginaAtual >= totalPaginas || carregandoTabela}
+                  title="Próxima página"
+                >
+                  ›
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="table-responsive">
@@ -568,37 +714,78 @@ function App() {
             </thead>
             <tbody>
               {ameacas.length > 0 ? (
-                ameacas.map((item) => (
-                  <tr key={item.cve_id}>
-                    <td className="cve-id-cell">
-                      <a
-                        href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(item.cve_id)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Abrir detalhes no NIST NVD"
-                      >
-                        <span>{item.cve_id}</span>
-                        <span>↗</span>
-                      </a>
-                    </td>
-                    <td>
-                      <span className={`cve-score-badge ${getScoreClass(item.nota_cvss)}`}>
-                        {Number(item.nota_cvss).toFixed(1)}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`cve-severity-badge ${getScoreClass(item.nota_cvss)}`}>
-                        {item.severidade || 'N/A'}
-                      </span>
-                    </td>
-                    <td className="cve-desc-cell" title={item.descricao}>
-                      {item.descricao}
-                    </td>
-                    <td className="cve-date-cell">
-                      {formatarData(item.data_extracao)}
-                    </td>
-                  </tr>
-                ))
+                ameacas.map((item) => {
+                  const isExpanded = !!expandedCves[item.cve_id]
+                  return (
+                    <tr
+                      key={item.cve_id}
+                      className={`threat-row ${isExpanded ? 'is-expanded' : 'is-collapsed'}`}
+                      onClick={() => toggleExpandCve(item.cve_id)}
+                      tabIndex={0}
+                      role="button"
+                      aria-expanded={isExpanded}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          toggleExpandCve(item.cve_id)
+                        }
+                      }}
+                    >
+                      <td className="cve-id-cell">
+                        <div className="cve-id-content">
+                          <a
+                            href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(item.cve_id)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Abrir detalhes no NIST NVD"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span>{item.cve_id}</span>
+                            <span>↗</span>
+                          </a>
+                          <button
+                            type="button"
+                            className="btn-card-expand"
+                            aria-label={isExpanded ? 'Recolher detalhes' : 'Expandir detalhes'}
+                            tabIndex={-1}
+                          >
+                            {isExpanded ? '▲' : '▼'}
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`cve-score-badge ${getScoreClass(item.nota_cvss)}`}>
+                          {Number(item.nota_cvss).toFixed(1)}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`cve-severity-badge ${getScoreClass(item.nota_cvss)}`}>
+                          {item.severidade || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="cve-desc-cell" title={item.descricao}>
+                        <div className="cve-desc-body">
+                          {item.descricao}
+                        </div>
+                        <div className="cve-expanded-actions">
+                          <a
+                            href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(item.cve_id)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn-nvd-action"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span>Consultar CVE no NIST NVD</span>
+                            <span>↗</span>
+                          </a>
+                        </div>
+                      </td>
+                      <td className="cve-date-cell">
+                        {formatarData(item.data_extracao)}
+                      </td>
+                    </tr>
+                  )
+                })
               ) : (
                 <tr>
                   <td colSpan={5}>
@@ -624,11 +811,11 @@ function App() {
           </table>
         </div>
 
-        {/* Barra de Paginação Server-Side */}
+        {/* Barra de Paginação Inferior Server-Side */}
         {totalRegistros > 0 && (
           <div className="table-pagination-bar">
             <div className="pagination-size-selector">
-              <span>Registros por página:</span>
+              <span>Registros:</span>
               <select
                 className="pagination-select"
                 value={itensPorPagina}
@@ -637,20 +824,21 @@ function App() {
                   setPaginaAtual(1)
                 }}
               >
+                <option value={10}>10</option>
                 <option value={15}>15</option>
                 <option value={25}>25</option>
                 <option value={50}>50</option>
                 <option value={100}>100</option>
               </select>
-              <span>
-                (Mostrando {indiceInicio} - {indiceFim} de {totalRegistros.toLocaleString('pt-BR')})
+              <span className="pagination-range-text">
+                ({indiceInicio} - {indiceFim} de {totalRegistros.toLocaleString('pt-BR')})
               </span>
             </div>
 
             <div className="pagination-controls-group">
               <button
                 className="btn-page"
-                onClick={() => setPaginaAtual(1)}
+                onClick={() => mudarPagina(1)}
                 disabled={paginaAtual <= 1 || carregandoTabela}
                 title="Primeira página"
               >
@@ -658,7 +846,7 @@ function App() {
               </button>
               <button
                 className="btn-page"
-                onClick={() => setPaginaAtual(prev => Math.max(1, prev - 1))}
+                onClick={() => mudarPagina(Math.max(1, paginaAtual - 1))}
                 disabled={paginaAtual <= 1 || carregandoTabela}
                 title="Página anterior"
               >
@@ -669,7 +857,7 @@ function App() {
               </span>
               <button
                 className="btn-page"
-                onClick={() => setPaginaAtual(prev => Math.min(totalPaginas, prev + 1))}
+                onClick={() => mudarPagina(Math.min(totalPaginas, paginaAtual + 1))}
                 disabled={paginaAtual >= totalPaginas || carregandoTabela}
                 title="Próxima página"
               >
@@ -677,7 +865,7 @@ function App() {
               </button>
               <button
                 className="btn-page"
-                onClick={() => setPaginaAtual(totalPaginas)}
+                onClick={() => mudarPagina(totalPaginas)}
                 disabled={paginaAtual >= totalPaginas || carregandoTabela}
                 title="Última página"
               >
@@ -701,6 +889,22 @@ function App() {
           </div>
         )}
       </footer>
+
+      {/* --------------------------------------------------------------------
+          7. BOTÃO FLUTUANTE VOLTAR AO TOPO (MOBILE & DESKTOP)
+          -------------------------------------------------------------------- */}
+      {mostrarVoltarTopo && (
+        <button
+          type="button"
+          className="btn-floating-top"
+          onClick={irParaTopo}
+          title="Voltar ao topo"
+          aria-label="Voltar ao topo da página"
+        >
+          <span className="floating-top-arrow">▲</span>
+          <span className="floating-top-label">TOPO</span>
+        </button>
+      )}
     </div>
   )
 }
