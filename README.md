@@ -1,4 +1,4 @@
-# 🛡️ Cyber Threat Intelligence Platform
+# Cyber Threat Intelligence Platform
 
 [![Daily ETL Pipeline](https://github.com/Sanak3/Cyber-Threat-Intel/actions/workflows/etl_pipeline.yml/badge.svg)](https://github.com/Sanak3/Cyber-Threat-Intel/actions)
 [![Frontend - Vercel](https://img.shields.io/badge/Frontend-Vercel-black?style=flat&logo=vercel)](https://cyber-threat-intel-three.vercel.app)
@@ -9,14 +9,14 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que au
 
 ---
 
-## 🚀 Live Demo
+## Live Demo
 
 - **Dashboard (Frontend):** [cyber-threat-intel-three.vercel.app](https://cyber-threat-intel-three.vercel.app)
 - **API Health Check (Backend):** [cyber-threat-intel-mmks.onrender.com/api/health](https://cyber-threat-intel-mmks.onrender.com/api/health)
 
 ---
 
-## 🏗️ Arquitetura do Sistema
+## Arquitetura do Sistema
 
 ```text
   [ NIST NVD API 2.0 (10.000 CVEs) ]
@@ -36,7 +36,7 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que au
 
 ---
 
-## ⚡ Funcionalidades
+## Funcionalidades
 
 - **Pipeline de Dados Escalável (10.000+ CVEs):** Extração paginada com controle estrito de *rate limit* (delays dinâmicos com/sem API Key) e retentativas com *backoff* para códigos 429/503/504.
 - **Análise Vetorial de Alta Performance (NumPy):** Parsing em cascata de métricas CVSS v3.1, v3.0 e v2.0, cálculo de desvio padrão, média global, score máximo/mínimo e indexação booleana instantânea.
@@ -47,7 +47,7 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que au
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
+## Tecnologias Utilizadas
 
 | Camada | Tecnologias |
 | :--- | :--- |
@@ -59,7 +59,7 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (CTI) que au
 
 ---
 
-## 📂 Estrutura do Repositório
+## Estrutura do Repositório
 
 ```bash
 Cyber-Threat-Intel/

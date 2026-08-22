@@ -362,7 +362,6 @@ function App() {
       <header className="soc-header">
         <div className="header-brand">
           <h1 className="brand-title">
-            <span className="brand-shield">🛡️</span>
             <span>CYBER THREAT INTEL</span>
             <span className="brand-tag">SOC ENGINE</span>
             <span className="brand-tag author-tag">BY SANAK3</span>
@@ -393,16 +392,16 @@ function App() {
           -------------------------------------------------------------------- */}
       <nav className="soc-quick-nav" aria-label="Navegação Rápida">
         <a href="#metricas" className="quick-nav-pill">
-          <span>⚡</span> Métricas
+          Métricas
         </a>
         <a href="#graficos" className="quick-nav-pill">
-          <span>📊</span> Gráficos
+          Gráficos
         </a>
         <a href="#filtros" className="quick-nav-pill">
-          <span>🔍</span> Busca &amp; Filtros
+          Busca &amp; Filtros
         </a>
         <a href="#feed-cves" className="quick-nav-pill">
-          <span>📋</span> Feed CVEs
+          Feed CVEs
         </a>
       </nav>
 
@@ -413,7 +412,6 @@ function App() {
         <div className="kpi-card kpi-total">
           <div className="kpi-card-header">
             <span className="kpi-title">Total Ingerido</span>
-            <span className="kpi-icon">📦</span>
           </div>
           <div className="kpi-value">
             {analyticsData.stats ? Number(analyticsData.stats.total_ameacas).toLocaleString('pt-BR') : '---'}
@@ -426,7 +424,6 @@ function App() {
         <div className="kpi-card kpi-critical">
           <div className="kpi-card-header">
             <span className="kpi-title">Ameaças Críticas</span>
-            <span className="kpi-icon">🔥</span>
           </div>
           <div className="kpi-value">
             {analyticsData.stats ? Number(analyticsData.stats.criticas).toLocaleString('pt-BR') : '---'}
@@ -439,7 +436,6 @@ function App() {
         <div className="kpi-card kpi-high">
           <div className="kpi-card-header">
             <span className="kpi-title">Ameaças Altas</span>
-            <span className="kpi-icon">⚠️</span>
           </div>
           <div className="kpi-value">
             {analyticsData.stats ? Number(analyticsData.stats.altas).toLocaleString('pt-BR') : '---'}
@@ -452,7 +448,6 @@ function App() {
         <div className="kpi-card kpi-score">
           <div className="kpi-card-header">
             <span className="kpi-title">Pior Risco Detectado</span>
-            <span className="kpi-icon">⚡</span>
           </div>
           <div className="kpi-value">
             {analyticsData.stats?.pior_risco ? Number(analyticsData.stats.pior_risco).toFixed(1) : '0.0'}
@@ -480,7 +475,6 @@ function App() {
         }}
       >
         <div className="accordion-title">
-          <span>📊</span>
           <span>ANALYTICS &amp; MATRIZ DE RISCO</span>
         </div>
         <span className="accordion-action">
@@ -583,7 +577,7 @@ function App() {
               }}
               title="Limpar busca"
             >
-              ✕
+              &times;
             </button>
           )}
         </div>
@@ -791,7 +785,7 @@ function App() {
                   <td colSpan={5}>
                     <div className="table-empty-state">
                       <div className="empty-state-icon">
-                        {carregandoTabela ? '⏳' : '🔍'}
+                        {carregandoTabela ? '[...]' : '[!]'}
                       </div>
                       <div className="empty-state-text">
                         {carregandoTabela

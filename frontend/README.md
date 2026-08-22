@@ -1,15 +1,15 @@
-# 🛡️ Cyber Threat Intel - Frontend Dashboard
+# Cyber Threat Intel - Frontend Dashboard
 
 Interface de monitoramento e visualização de dados de inteligência de ameaças cibernéticas (CVEs).
 
-## 🚀 Tecnologias
+## Tecnologias
 
 - **React 19**
 - **Vite**
 - **Recharts** (Gráficos interativos)
 - **Axios** (Requisições HTTP)
 
-## 💻 Como Rodar
+## Como Rodar
 
 1. Instale as dependências:
    ```bash

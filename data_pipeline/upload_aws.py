@@ -120,7 +120,7 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         print(f"[+] [ETL Load] SUCESSO: {len(registros_tuplas):,} registros sincronizados no AWS RDS em {duracao_banco:.2f}s!")
 
         duracao_total = time.time() - inicio_total
-        print(f"\n[✔] Pipeline ETL concluído com êxito em {duracao_total:.1f}s.")
+        print(f"\n[+] Pipeline ETL concluído com êxito em {duracao_total:.1f}s.")
         return True
 
     except psycopg2.Error as db_err:
