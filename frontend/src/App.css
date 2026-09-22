@@ -2302,4 +2302,26 @@
   color: var(--text-muted);
 }
 
+.btn-reset-chain-filter {
+  margin-top: 0.85rem;
+  background: rgba(0, 212, 255, 0.12);
+  border: 1px solid rgba(0, 212, 255, 0.4);
+  color: var(--electric-cyan);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-block;
+}
+
+.btn-reset-chain-filter:hover {
+  background: rgba(0, 212, 255, 0.25);
+  border-color: var(--electric-cyan);
+  box-shadow: 0 0 12px var(--electric-cyan-glow);
+  transform: translateY(-1px);
+}
+
 

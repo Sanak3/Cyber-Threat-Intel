@@ -522,7 +522,7 @@ function App() {
           }}
           title="Ver Exploit Chains Correlacionadas"
         >
-          ⚡ Exploit Chains ({exploitChains.length})
+          Exploit Chains ({exploitChains.length})
         </button>
       </nav>
 
@@ -656,7 +656,7 @@ function App() {
               }}
               title="Abrir Exploit Chains correlacionadas"
             >
-              <span>CHAINS 🔗</span>
+              <span>CHAINS</span>
             </button>
           </div>
           <div className="tech-ranking-list">
@@ -682,7 +682,7 @@ function App() {
                       {tech.nome}
                     </span>
                     <div className="tech-ranking-right">
-                      <span className="tech-chain-tag">Chains 🔗</span>
+                      <span className="tech-chain-tag">Chains</span>
                       <span className="tech-ranking-count" style={{ color: tech.cor }}>
                         {tech.total.toLocaleString('pt-BR')} CVEs
                       </span>
@@ -914,17 +914,17 @@ function App() {
                           <div className="cve-ml-tags">
                             {item.primitiva && item.primitiva !== 'GENERIC_VULN' && (
                               <span className={`cve-primitive-tag primitive-${String(item.primitiva).toLowerCase()}`}>
-                                ⚡ {item.primitiva}
+                                {item.primitiva}
                               </span>
                             )}
                             {item.cluster_label && item.cluster_label !== 'Geral / Não Clusterizado' && (
                               <span className="cve-cluster-tag">
-                                ⬡ {item.cluster_label}
+                                {item.cluster_label}
                               </span>
                             )}
                             {item.tecnologia && item.tecnologia !== 'Desconhecido / Geral' && (
                               <span className="cve-tech-tag">
-                                💻 {item.tecnologia}
+                                {item.tecnologia}
                               </span>
                             )}
                           </div>
@@ -1172,7 +1172,14 @@ function App() {
                   })
                 ) : (
                   <div className="chains-empty-sidebar">
-                    Nenhuma cadeia encontrada para este filtro.
+                    <p>Nenhuma cadeia encontrada para este ecossistema.</p>
+                    <button
+                      type="button"
+                      className="btn-reset-chain-filter"
+                      onClick={() => setFiltroEcoChain('TODOS')}
+                    >
+                      Exibir todas as cadeias ({exploitChains.length})
+                    </button>
                   </div>
                 )}
               </div>
@@ -1220,11 +1227,11 @@ function App() {
 
                     <div className="writeup-footer-grid">
                       <div className="writeup-impact-box">
-                        <div className="footer-box-title">⚡ IMPACTO TÉCNICO CONSOLIDADO</div>
+                        <div className="footer-box-title">IMPACTO TÉCNICO CONSOLIDADO</div>
                         <div className="footer-box-content">{activeChain.writeup.impacto_tecnico}</div>
                       </div>
                       <div className="writeup-mitigation-box">
-                        <div className="footer-box-title">🛡️ MITIGAÇÕES RECOMENDADAS PELO SOC</div>
+                        <div className="footer-box-title">MITIGAÇÕES RECOMENDADAS PELO SOC</div>
                         <ul className="footer-box-list">
                           {activeChain.writeup.mitigacoes_recomendadas && activeChain.writeup.mitigacoes_recomendadas.map((mit, i) => (
                             <li key={i}>{mit}</li>
@@ -1235,7 +1242,16 @@ function App() {
                   </div>
                 ) : (
                   <div className="no-chain-selected">
-                    Selecione uma cadeia na lista lateral para visualizar o Writeup Blueprint.
+                    <p>Nenhuma cadeia selecionada ou disponível para este ecossistema.</p>
+                    {filtroEcoChain !== 'TODOS' && (
+                      <button
+                        type="button"
+                        className="btn-reset-chain-filter"
+                        onClick={() => setFiltroEcoChain('TODOS')}
+                      >
+                        Exibir todas as cadeias ({exploitChains.length})
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
