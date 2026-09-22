@@ -56,7 +56,9 @@ app.use('/api/', apiLimiter);
 // -----------------------------------------------------------------------------
 const memoryCache = {
     analytics: { data: null, expiresAt: 0 },
-    stats: { data: null, expiresAt: 0 }
+    stats: { data: null, expiresAt: 0 },
+    chains: { data: null, expiresAt: 0 },
+    clusters: { data: null, expiresAt: 0 }
 };
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos de cache em memória (RAM)
 
@@ -167,12 +169,91 @@ app.get('/api/threats/analytics', async (req, res) => {
     }
 });
 
-// Rota 3: Lista das Maiores Ameaças Críticas / Altas (Score >= 7.0)
+// Rota 3: Exploit Chains e Blueprints de Ataque Gerados por IA/Grafos
+app.get('/api/threats/chains', async (req, res) => {
+    try {
+        const agora = Date.now();
+        if (memoryCache.chains.data && agora < memoryCache.chains.expiresAt) {
+            res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+            return res.json(memoryCache.chains.data);
+        }
+
+        const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+        const query = `
+            SELECT chain_id, tecnologia, severidade, score_cvss, cves, writeup, data_criacao
+            FROM exploit_chains
+            ORDER BY score_cvss DESC, data_criacao DESC
+            LIMIT $1;
+        `;
+        const { rows } = await pool.query(query);
+
+        memoryCache.chains = { data: rows, expiresAt: agora + CACHE_TTL_MS };
+
+        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+        res.json(rows);
+    } catch (error) {
+        console.error("[-] Erro ao buscar exploit chains:", error.message);
+        // Retorno defensivo vazio caso a tabela ainda não exista em banco legado
+        res.json([]);
+    }
+});
+
+// Rota 4: Estatísticas de Clusters e Primitivas
+app.get('/api/threats/clusters', async (req, res) => {
+    try {
+        const agora = Date.now();
+        if (memoryCache.clusters.data && agora < memoryCache.clusters.expiresAt) {
+            res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+            return res.json(memoryCache.clusters.data);
+        }
+
+        const clusterQuery = `
+            SELECT 
+                cluster_label, 
+                COUNT(*) as total,
+                ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2) as media_score
+            FROM threats
+            WHERE cluster_label IS NOT NULL AND cluster_label != 'Geral / Não Clusterizado'
+            GROUP BY cluster_label
+            ORDER BY total DESC;
+        `;
+
+        const primitiveQuery = `
+            SELECT 
+                primitiva,
+                COUNT(*) as total
+            FROM threats
+            WHERE primitiva IS NOT NULL AND primitiva != 'GENERIC_VULN'
+            GROUP BY primitiva
+            ORDER BY total DESC;
+        `;
+
+        const [clusterRes, primitiveRes] = await Promise.all([
+            pool.query(clusterQuery),
+            pool.query(primitiveQuery)
+        ]);
+
+        const payload = {
+            clusters: clusterRes.rows,
+            primitivas: primitiveRes.rows
+        };
+
+        memoryCache.clusters = { data: payload, expiresAt: agora + CACHE_TTL_MS };
+
+        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+        res.json(payload);
+    } catch (error) {
+        console.error("[-] Erro ao buscar clusters:", error.message);
+        res.json({ clusters: [], primitivas: [] });
+    }
+});
+
+// Rota 5: Lista das Maiores Ameaças Críticas / Altas (Score >= 7.0)
 app.get('/api/threats/critical', async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
         const query = `
-            SELECT cve_id, descricao, nota_cvss, severidade, data_extracao 
+            SELECT cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, data_extracao 
             FROM threats 
             WHERE nota_cvss >= 7.0 
             ORDER BY nota_cvss DESC, data_extracao DESC 
@@ -187,7 +268,7 @@ app.get('/api/threats/critical', async (req, res) => {
     }
 });
 
-// Rota 4: Consulta Paginada de Alta Performance com Full-Text Search (GIN) e Filtros
+// Rota 6: Consulta Paginada de Alta Performance com Full-Text Search (GIN) e Filtros
 app.get('/api/threats', async (req, res) => {
     try {
         const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -196,6 +277,7 @@ app.get('/api/threats', async (req, res) => {
 
         const rawSearch = req.query.search ? String(req.query.search).trim() : null;
         const severity = req.query.severity && req.query.severity !== 'TODOS' ? String(req.query.severity).toUpperCase() : null;
+        const primitive = req.query.primitive ? String(req.query.primitive).trim() : null;
 
         let whereClauses = [];
         let queryParams = [];
@@ -203,17 +285,24 @@ app.get('/api/threats', async (req, res) => {
         if (rawSearch) {
             queryParams.push(rawSearch);
             const p = queryParams.length;
-            // Busca Híbrida: Full-Text Search no GIN Index + ILIKE para substrings parciais de CVE IDs
+            // Busca Híbrida: Full-Text Search no GIN Index + ILIKE para substrings parciais de CVE IDs e tecnologias
             whereClauses.push(`(
                 cve_id ILIKE '%' || $${p} || '%'
                 OR to_tsvector('english', coalesce(descricao, '')) @@ plainto_tsquery('english', $${p})
                 OR descricao ILIKE '%' || $${p} || '%'
+                OR tecnologia ILIKE '%' || $${p} || '%'
+                OR cluster_label ILIKE '%' || $${p} || '%'
             )`);
         }
 
         if (severity) {
             queryParams.push(severity);
             whereClauses.push(`severidade = $${queryParams.length}`);
+        }
+
+        if (primitive) {
+            queryParams.push(primitive);
+            whereClauses.push(`primitiva = $${queryParams.length}`);
         }
 
         const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -230,7 +319,7 @@ app.get('/api/threats', async (req, res) => {
         const offsetParamIndex = queryParams.length;
 
         const dataQuery = `
-            SELECT cve_id, descricao, nota_cvss, severidade, data_extracao 
+            SELECT cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, data_extracao 
             FROM threats 
             ${whereSql}
             ORDER BY nota_cvss DESC, data_extracao DESC 
@@ -253,5 +342,5 @@ app.get('/api/threats', async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Compression + RAM Cache + GIN FTS Ativos]`);
+    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Compression + RAM Cache + GIN FTS + ML Chains Ativos]`);
 });
