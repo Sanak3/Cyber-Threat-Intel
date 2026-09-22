@@ -32,11 +32,16 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         print("[-] [ETL Load] Falha na extração de dados do NIST. Abortando carga.")
         return False
 
-    # 2. Transformação e análise matemática
-    vulnerabilidades = transformar_dados(dados_brutos)
-    if not vulnerabilidades:
+    # 2. Transformação e análise matemática com motor de ML
+    resultado_transform = transformar_dados(dados_brutos)
+    if not resultado_transform:
         print("[-] [ETL Load] Nenhuma vulnerabilidade processada para upload.")
         return False
+
+    if isinstance(resultado_transform, tuple):
+        vulnerabilidades, writeups = resultado_transform
+    else:
+        vulnerabilidades, writeups = resultado_transform, []
 
     # 3. Deduplicação em memória por id_cve (Impede erro de colisão no mesmo comando ON CONFLICT)
     mapa_dedup = {item["id_cve"]: item for item in vulnerabilidades if item.get("id_cve")}
@@ -46,13 +51,16 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
     if total_duplicados > 0:
         print(f"[!] [ETL Load] Deduplicação em memória: {total_duplicados:,} CVEs repetidos descartados ({len(vulnerabilidades_unicas):,} únicos para gravação).")
 
-    # 4. Preparação das tuplas para inserção em lote
+    # 4. Preparação das tuplas para inserção em lote (com colunas de ML)
     registros_tuplas = [
         (
             item["id_cve"],
             item["descricao"],
             float(item["nota_cvss"]),
-            item["severidade"]
+            item["severidade"],
+            item.get("primitiva", "GENERIC_VULN"),
+            item.get("tecnologia", "Desconhecido / Geral"),
+            item.get("cluster_label", "Geral / Não Clusterizado")
         )
         for item in vulnerabilidades_unicas
     ]
@@ -73,14 +81,31 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         )
         cursor = conn.cursor()
 
-        # Garante a existência da tabela threats
+        # Garante a existência da tabela threats com colunas de ML
         create_table_query = """
         CREATE TABLE IF NOT EXISTS threats (
             cve_id VARCHAR(50) PRIMARY KEY,
             descricao TEXT,
             nota_cvss FLOAT,
             severidade VARCHAR(20),
+            primitiva VARCHAR(50) DEFAULT 'GENERIC_VULN',
+            tecnologia VARCHAR(100) DEFAULT 'Desconhecido / Geral',
+            cluster_label VARCHAR(150) DEFAULT 'Geral / Não Clusterizado',
             data_extracao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS primitiva VARCHAR(50) DEFAULT 'GENERIC_VULN';
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS tecnologia VARCHAR(100) DEFAULT 'Desconhecido / Geral';
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS cluster_label VARCHAR(150) DEFAULT 'Geral / Não Clusterizado';
+
+        -- Tabela dedicada para Exploit Chains e Blueprints
+        CREATE TABLE IF NOT EXISTS exploit_chains (
+            chain_id VARCHAR(50) PRIMARY KEY,
+            tecnologia VARCHAR(100),
+            severidade VARCHAR(20),
+            score_cvss FLOAT,
+            cves JSONB,
+            writeup JSONB,
+            data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """
         cursor.execute(create_table_query)
@@ -89,18 +114,25 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         create_indexes_query = """
         CREATE INDEX IF NOT EXISTS idx_threats_cvss_data ON threats (nota_cvss DESC, data_extracao DESC);
         CREATE INDEX IF NOT EXISTS idx_threats_severidade ON threats (severidade);
+        CREATE INDEX IF NOT EXISTS idx_threats_cluster ON threats (cluster_label);
+        CREATE INDEX IF NOT EXISTS idx_threats_primitiva ON threats (primitiva);
         CREATE INDEX IF NOT EXISTS idx_threats_fts ON threats USING GIN (to_tsvector('english', coalesce(descricao, '')));
+        CREATE INDEX IF NOT EXISTS idx_chains_tecnologia ON exploit_chains (tecnologia);
+        CREATE INDEX IF NOT EXISTS idx_chains_severidade ON exploit_chains (severidade);
         """
         cursor.execute(create_indexes_query)
 
-        # Query de Upsert em lote de alta performance
+        # Query de Upsert em lote de alta performance para threats
         upsert_query = """
-        INSERT INTO threats (cve_id, descricao, nota_cvss, severidade)
+        INSERT INTO threats (cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label)
         VALUES %s
         ON CONFLICT (cve_id) DO UPDATE SET
             descricao = EXCLUDED.descricao,
             nota_cvss = EXCLUDED.nota_cvss,
             severidade = EXCLUDED.severidade,
+            primitiva = EXCLUDED.primitiva,
+            tecnologia = EXCLUDED.tecnologia,
+            cluster_label = EXCLUDED.cluster_label,
             data_extracao = CURRENT_TIMESTAMP;
         """
 
@@ -113,6 +145,39 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
             argslist=registros_tuplas,
             page_size=batch_size
         )
+
+        # Gravação das Exploit Chains detectadas
+        if writeups:
+            import json
+            print(f"[+] [ETL Load] Gravando {len(writeups)} Exploit Chains e Writeup Blueprints na tabela exploit_chains...")
+            chains_tuplas = [
+                (
+                    w["chain_id"],
+                    w["tecnologia"],
+                    w["severidade"],
+                    float(w["score_cvss"]),
+                    json.dumps(w["cves"]),
+                    json.dumps(w)
+                )
+                for w in writeups
+            ]
+            upsert_chains_query = """
+            INSERT INTO exploit_chains (chain_id, tecnologia, severidade, score_cvss, cves, writeup)
+            VALUES %s
+            ON CONFLICT (chain_id) DO UPDATE SET
+                tecnologia = EXCLUDED.tecnologia,
+                severidade = EXCLUDED.severidade,
+                score_cvss = EXCLUDED.score_cvss,
+                cves = EXCLUDED.cves,
+                writeup = EXCLUDED.writeup,
+                data_criacao = CURRENT_TIMESTAMP;
+            """
+            execute_values(
+                cur=cursor,
+                sql=upsert_chains_query,
+                argslist=chains_tuplas,
+                page_size=100
+            )
 
         conn.commit()
         duracao_banco = time.time() - inicio_banco

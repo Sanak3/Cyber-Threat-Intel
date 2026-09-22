@@ -161,4 +161,45 @@ def transformar_dados(dados_brutos):
 
     print("=" * 65 + "\n")
 
-    return vulnerabilidades_limpas
+    # --------------------------------------------------------------------------
+    # MOTOR DE INTELIGÊNCIA ARTIFICIAL E GRAFOS (ML ENGINE)
+    # --------------------------------------------------------------------------
+    print("[+] [ML Engine] Iniciando enriquecimento de primitivas táticas e clustering...")
+    try:
+        from ml_engine.primitives import enriquecer_vulnerabilidades
+        from ml_engine.clusterizer import CVEClusterizer, MODEL_FILE
+        from ml_engine.chain_detector import ExploitChainDetector
+        from ml_engine.writeup_builder import WriteupBuilder
+
+        # 1. Enriquecimento de Primitivas e Tecnologia
+        df = enriquecer_vulnerabilidades(vulnerabilidades_limpas)
+
+        # 2. Clusterização Semântica (TF-IDF + KMeans)
+        if len(df) >= 6:
+            try:
+                clusterizer = CVEClusterizer(n_clusters=6)
+                df = clusterizer.fit_predict(df)
+                clusterizer.save(MODEL_FILE)
+            except Exception as e_cluster:
+                print(f"[!] [ML Engine] Aviso no clustering: {e_cluster}. Usando labels genéricos.")
+                df["cluster_id"] = 0
+                df["cluster_label"] = "Geral / Não Clusterizado"
+        else:
+            df["cluster_id"] = 0
+            df["cluster_label"] = "Geral / Não Clusterizado"
+
+        # 3. Detecção de Exploit Chains com NetworkX
+        detector = ExploitChainDetector()
+        detector.construir_grafo(df)
+        chains = detector.detectar_chains(max_chains=50)
+
+        # 4. Construção dos Writeup Blueprints
+        writeups = WriteupBuilder.construir_relatorio_completo(chains)
+        print(f"[+] [ML Engine] Concluído: {len(writeups)} Writeup Blueprints de cadeias de ataque gerados com sucesso.\n")
+
+        vulnerabilidades_enriquecidas = df.to_dict("records")
+        return vulnerabilidades_enriquecidas, writeups
+
+    except Exception as e_ml:
+        print(f"[-] [ML Engine - AVISO] Falha ao processar motor de ML: {e_ml}. Prosseguindo sem ML.")
+        return vulnerabilidades_limpas, []
