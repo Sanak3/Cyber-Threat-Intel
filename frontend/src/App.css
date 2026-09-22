@@ -1508,3 +1508,401 @@
     font-size: 0.65rem;
   }
 }
+
+/* ==============================================================================
+   EXPLOIT CHAINS & WRITEUP BLUEPRINTS (AI & GRAPH ENGINE)
+   ============================================================================== */
+.exploit-chains-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 0, 85, 0.35);
+  border-radius: 12px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  box-shadow: 0 10px 35px rgba(255, 0, 85, 0.08);
+  position: relative;
+  overflow: hidden;
+}
+
+.exploit-chains-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ff0055, #a855f7, transparent);
+}
+
+.chains-badge-count {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(255, 0, 85, 0.15);
+  color: #ff0055;
+  border: 1px solid rgba(255, 0, 85, 0.35);
+  letter-spacing: 0.5px;
+}
+
+.chains-selector-bar {
+  display: flex;
+  gap: 0.6rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+  scrollbar-width: thin;
+}
+
+.chain-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border-cyber);
+  border-radius: 8px;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.chain-tab-btn:hover {
+  border-color: rgba(255, 0, 85, 0.5);
+  background: rgba(255, 0, 85, 0.08);
+}
+
+.chain-tab-btn.active {
+  border-color: #ff0055;
+  background: rgba(255, 0, 85, 0.18);
+  box-shadow: 0 0 15px rgba(255, 0, 85, 0.3);
+}
+
+.chain-tab-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+.chain-tab-badge.badge-critical {
+  background: rgba(255, 0, 85, 0.25);
+  color: #ff3366;
+  border: 1px solid rgba(255, 0, 85, 0.5);
+}
+
+.chain-tab-badge.badge-high {
+  background: rgba(255, 153, 0, 0.25);
+  color: #ff9900;
+  border: 1px solid rgba(255, 153, 0, 0.5);
+}
+
+.chain-tab-title {
+  font-weight: 600;
+}
+
+.chain-tab-id {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.writeup-blueprint-container {
+  background: rgba(10, 15, 29, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.writeup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 1.25rem;
+}
+
+.writeup-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.writeup-badge-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.writeup-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #00ff88;
+  background: rgba(0, 255, 136, 0.12);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+.writeup-target-tag {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: #00d4ff;
+  font-weight: 600;
+}
+
+.writeup-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #ffffff;
+  font-family: var(--font-mono);
+  line-height: 1.4;
+}
+
+.writeup-summary {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.writeup-score-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 0, 85, 0.1);
+  border: 1px solid rgba(255, 0, 85, 0.35);
+  border-radius: 8px;
+  padding: 0.75rem 1.25rem;
+  min-width: 120px;
+}
+
+.writeup-score-title {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.writeup-score-number {
+  font-family: var(--font-mono);
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #ff0055;
+  text-shadow: 0 0 15px rgba(255, 0, 85, 0.5);
+}
+
+.writeup-score-sub {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: #ff3366;
+  letter-spacing: 1px;
+}
+
+/* Fluxo Visual dos Passos da Cadeia */
+.chain-steps-flow {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.chain-step-node {
+  flex: 1;
+  min-width: 260px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-cyber);
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  position: relative;
+}
+
+.step-node-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.step-badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+}
+
+.step-cve-id {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #00d4ff;
+}
+
+.step-primitive-pill {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+}
+
+.step-action-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.step-detail-text {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.step-flow-arrow {
+  position: absolute;
+  right: -0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #ff0055;
+  font-size: 1.1rem;
+  font-weight: 900;
+  z-index: 2;
+  text-shadow: 0 0 10px rgba(255, 0, 85, 0.8);
+}
+
+.writeup-footer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+@media (max-width: 800px) {
+  .writeup-footer-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.writeup-impact-box, .writeup-mitigation-box {
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.footer-box-title {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+}
+
+.footer-box-content {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.footer-box-list {
+  padding-left: 1.25rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+/* ==============================================================================
+   TAGS DE MACHINE LEARNING E PRIMITIVAS NA TABELA
+   ============================================================================== */
+.cve-ml-tags {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.cve-primitive-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.primitive-recon_info_leak {
+  background: rgba(6, 182, 212, 0.15);
+  color: #06b6d4;
+  border: 1px solid rgba(6, 182, 212, 0.35);
+}
+
+.primitive-auth_bypass {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.35);
+}
+
+.primitive-injection_rce {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.primitive-priv_esc {
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+.primitive-denial_of_service {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.cve-cluster-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.cve-tech-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+

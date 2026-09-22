@@ -36,6 +36,9 @@ function App() {
   // 1. Estados de Telemetria e Analytics Globais (Instant Hydration no F5 via sessionStorage)
   const [apiStatus, setApiStatus] = useState('ONLINE')
   const [dbConectado, setDbConectado] = useState(true)
+  const [exploitChains, setExploitChains] = useState([])
+  const [selectedChainId, setSelectedChainId] = useState(null)
+  const [clustersData, setClustersData] = useState({ clusters: [], primitivas: [] })
   const [analyticsData, setAnalyticsData] = useState(() => {
     try {
       const cached = sessionStorage.getItem('cti_analytics_cache')
@@ -93,6 +96,11 @@ function App() {
   const [mostrarVoltarTopo, setMostrarVoltarTopo] = useState(false)
   const threatTableRef = useRef(null)
 
+  const activeChain = useMemo(() => {
+    if (!exploitChains || exploitChains.length === 0) return null
+    return exploitChains.find((c) => c.chain_id === selectedChainId) || exploitChains[0]
+  }, [exploitChains, selectedChainId])
+
   // ---------------------------------------------------------------------------
   // EFEITO 1: Debounce de 400ms no termo de busca (Full-Text Search)
   // ---------------------------------------------------------------------------
@@ -130,9 +138,11 @@ function App() {
 
     const carregarAnalytics = async () => {
       try {
-        const [healthRes, analyticsRes] = await Promise.allSettled([
+        const [healthRes, analyticsRes, chainsRes, clustersRes] = await Promise.allSettled([
           axios.get(`${API_URL}/api/health`),
-          axios.get(`${API_URL}/api/threats/analytics`)
+          axios.get(`${API_URL}/api/threats/analytics`),
+          axios.get(`${API_URL}/api/threats/chains`),
+          axios.get(`${API_URL}/api/threats/clusters`)
         ])
 
         if (!isMounted) return
@@ -164,6 +174,17 @@ function App() {
           }
         } else {
           setDbConectado(false)
+        }
+
+        if (chainsRes.status === 'fulfilled' && Array.isArray(chainsRes.value.data)) {
+          setExploitChains(chainsRes.value.data)
+          if (chainsRes.value.data.length > 0 && !selectedChainId) {
+            setSelectedChainId(chainsRes.value.data[0].chain_id)
+          }
+        }
+
+        if (clustersRes.status === 'fulfilled' && clustersRes.value.data) {
+          setClustersData(clustersRes.value.data)
         }
       } catch (err) {
         console.error('[-] Erro ao carregar analytics do SOC:', err)
@@ -553,6 +574,96 @@ function App() {
       </section>
 
       {/* --------------------------------------------------------------------
+          3.5. DETECTOR DE EXPLOIT CHAINS (AI & DIRECTED GRAPH BLUEPRINTS)
+          -------------------------------------------------------------------- */}
+      {exploitChains && exploitChains.length > 0 && activeChain && (
+        <section className="exploit-chains-card">
+          <div className="section-header">
+            <div className="section-header-left">
+              <h2 className="section-title">
+                <span className="section-title-prefix">&gt;_</span>
+                <span>CADEIAS DE ATAQUE CORRELACIONADAS // EXPLOIT CHAINS & WRITEUP BLUEPRINTS</span>
+              </h2>
+              <span className="chains-badge-count">{exploitChains.length} Chains Ativas</span>
+            </div>
+          </div>
+
+          {/* Seletor de Chains em Abas */}
+          <div className="chains-selector-bar">
+            {exploitChains.map((chain) => (
+              <button
+                key={chain.chain_id}
+                type="button"
+                className={`chain-tab-btn ${chain.chain_id === activeChain.chain_id ? 'active' : ''}`}
+                onClick={() => setSelectedChainId(chain.chain_id)}
+              >
+                <span className={`chain-tab-badge ${chain.severidade === 'CRITICAL' ? 'badge-critical' : 'badge-high'}`}>
+                  {chain.severidade}
+                </span>
+                <span className="chain-tab-title">{chain.tecnologia}</span>
+                <span className="chain-tab-id">({chain.chain_id})</span>
+              </button>
+            ))}
+          </div>
+
+          {activeChain.writeup && (
+            <div className="writeup-blueprint-container">
+              <div className="writeup-header">
+                <div className="writeup-title-block">
+                  <div className="writeup-badge-row">
+                    <span className="writeup-label">WRITEUP BLUEPRINT (AI GRAPH ENGINE)</span>
+                    <span className="writeup-target-tag">ALVO: {activeChain.tecnologia}</span>
+                  </div>
+                  <h3 className="writeup-title">{activeChain.writeup.titulo}</h3>
+                  <p className="writeup-summary">{activeChain.writeup.resumo_executivo}</p>
+                </div>
+                <div className="writeup-score-block">
+                  <span className="writeup-score-title">SCORE COMPOSTO</span>
+                  <span className="writeup-score-number">{Number(activeChain.score_cvss || 10.0).toFixed(1)}</span>
+                  <span className="writeup-score-sub">{activeChain.severidade} RISK</span>
+                </div>
+              </div>
+
+              {/* Fluxo Visual Sequencial de Nós da Cadeia */}
+              <div className="chain-steps-flow">
+                {activeChain.writeup.passos_ataque && activeChain.writeup.passos_ataque.map((passo, idx) => (
+                  <div key={idx} className="chain-step-node">
+                    <div className="step-node-header">
+                      <span className="step-badge">PASSO {passo.passo}</span>
+                      <span className="step-cve-id">{passo.cve_id}</span>
+                      <span className={`step-primitive-pill primitive-${String(passo.primitiva || '').toLowerCase()}`}>
+                        {passo.primitiva}
+                      </span>
+                    </div>
+                    <div className="step-action-text">{passo.acao}</div>
+                    <div className="step-detail-text">{passo.detalhe}</div>
+                    {idx < activeChain.writeup.passos_ataque.length - 1 && (
+                      <div className="step-flow-arrow">➔</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="writeup-footer-grid">
+                <div className="writeup-impact-box">
+                  <div className="footer-box-title">⚡ IMPACTO TÉCNICO CONSOLIDADO</div>
+                  <div className="footer-box-content">{activeChain.writeup.impacto_tecnico}</div>
+                </div>
+                <div className="writeup-mitigation-box">
+                  <div className="footer-box-title">🛡️ MITIGAÇÕES RECOMENDADAS PELO SOC</div>
+                  <ul className="footer-box-list">
+                    {activeChain.writeup.mitigacoes_recomendadas && activeChain.writeup.mitigacoes_recomendadas.map((mit, i) => (
+                      <li key={i}>{mit}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* --------------------------------------------------------------------
           4. CAMPO DE BUSCA FULL-TEXT SEARCH & FILTROS EM TEMPO REAL
           -------------------------------------------------------------------- */}
       <section id="filtros" className="filter-panel">
@@ -761,6 +872,25 @@ function App() {
                         <div className="cve-desc-body">
                           {item.descricao}
                         </div>
+                        {((item.primitiva && item.primitiva !== 'GENERIC_VULN') || (item.cluster_label && item.cluster_label !== 'Geral / Não Clusterizado')) && (
+                          <div className="cve-ml-tags">
+                            {item.primitiva && item.primitiva !== 'GENERIC_VULN' && (
+                              <span className={`cve-primitive-tag primitive-${String(item.primitiva).toLowerCase()}`}>
+                                ⚡ {item.primitiva}
+                              </span>
+                            )}
+                            {item.cluster_label && item.cluster_label !== 'Geral / Não Clusterizado' && (
+                              <span className="cve-cluster-tag">
+                                ⬡ {item.cluster_label}
+                              </span>
+                            )}
+                            {item.tecnologia && item.tecnologia !== 'Desconhecido / Geral' && (
+                              <span className="cve-tech-tag">
+                                💻 {item.tecnologia}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <div className="cve-expanded-actions">
                           <a
                             href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(item.cve_id)}`}
