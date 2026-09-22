@@ -8,17 +8,21 @@ const pool = require('./db_connect');
 const app = express();
 const port = process.env.PORT || 5001;
 
-// 1. Headers de Segurança HTTP e Remoção de Fingerprint
+// 1. Configuração de Proxy Reverso (Essencial para Render/Vercel rate-limiting por IP real)
+app.set('trust proxy', 1);
+
+// 2. Headers de Segurança HTTP e Remoção de Fingerprint
 app.use(helmet());
 app.disable('x-powered-by');
 
-// 2. Compressão HTTP Gzip / Deflate para Reduzir Latência de Rede em até 80%
+// 3. Compressão HTTP Gzip / Deflate para Reduzir Latência de Rede em até 80%
 app.use(compression());
 
-// 3. Configuração Dinâmica de CORS com Suporte a Vercel Previews
+// 4. Configuração Rigorosa de CORS com Suporte a Vercel Previews
 const origensEstaticas = [
     'http://localhost:5173',
     'http://localhost:3000',
+    'https://cyber-threat-intel-three.vercel.app',
     process.env.FRONTEND_URL
 ].filter(Boolean);
 
@@ -26,8 +30,10 @@ const corsOptions = {
     origin: (origin, callback) => {
         if (!origin) return callback(null, true);
         if (origensEstaticas.includes(origin)) return callback(null, true);
-        if (/\.vercel\.app$/.test(origin) || origin === 'https://vercel.app') return callback(null, true);
-        return callback(new Error(`Acesso bloqueado pela política de CORS para a origem: ${origin}`));
+        // Permite apenas previews legítimas do próprio projeto no Vercel
+        if (/^https:\/\/cyber-threat-intel.*\.vercel\.app$/.test(origin)) return callback(null, true);
+        // Rejeita requisição silenciosamente sem quebrar com erro 500 não tratado
+        return callback(null, false);
     },
     methods: ['GET'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -37,10 +43,10 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '50kb' }));
 
-// 4. Rate Limiting para Proteção contra DoS / Abuso de Recursos
+// 5. Rate Limiting para Proteção contra DoS / Abuso de Recursos
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // Janela de 15 minutos
-    max: 300, // Limite de 300 requisições por IP por janela
+    max: 300, // Limite de 300 requisições por IP real por janela
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -344,7 +350,7 @@ app.get('/api/threats/chains', async (req, res) => {
             return res.json(memoryCache.chains.data);
         }
 
-        const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 50, 100));
         let chainsRetornadas = [];
 
         try {
@@ -431,7 +437,7 @@ app.get('/api/threats/clusters', async (req, res) => {
 // Rota 5: Lista das Maiores Ameaças Críticas / Altas (Score >= 7.0)
 app.get('/api/threats/critical', async (req, res) => {
     try {
-        const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 100, 1000));
         const query = `
             SELECT cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, data_extracao 
             FROM threats 
@@ -448,16 +454,39 @@ app.get('/api/threats/critical', async (req, res) => {
     }
 });
 
+// Constantes de Validação para Prevenção de Injeções e Poluição de Parâmetros
+const SEVERIDADES_VALIDAS = new Set(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']);
+const PRIMITIVAS_VALIDAS = new Set([
+    'RECON_INFO_LEAK',
+    'AUTH_BYPASS',
+    'INJECTION_RCE',
+    'PRIV_ESC',
+    'DENIAL_OF_SERVICE',
+    'GENERIC_VULN'
+]);
+
 // Rota 6: Consulta Paginada de Alta Performance com Full-Text Search (GIN) e Filtros
 app.get('/api/threats', async (req, res) => {
     try {
-        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 1000);
+        const page = Math.max(1, Math.min(parseInt(req.query.page, 10) || 1, 100000));
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 50, 1000));
         const offset = (page - 1) * limit;
 
-        const rawSearch = req.query.search ? String(req.query.search).trim() : null;
-        const severity = req.query.severity && req.query.severity !== 'TODOS' ? String(req.query.severity).toUpperCase() : null;
-        const primitive = req.query.primitive ? String(req.query.primitive).trim() : null;
+        // Sanitização de busca: limite de 100 caracteres e remoção de caracteres nulos
+        const rawSearch = req.query.search 
+            ? String(req.query.search).slice(0, 100).replace(/\0/g, '').trim() 
+            : null;
+
+        // Validação estrita por whitelist para filtros categóricos
+        const inputSeverity = req.query.severity && req.query.severity !== 'TODOS' 
+            ? String(req.query.severity).toUpperCase().trim() 
+            : null;
+        const severity = inputSeverity && SEVERIDADES_VALIDAS.has(inputSeverity) ? inputSeverity : null;
+
+        const inputPrimitive = req.query.primitive 
+            ? String(req.query.primitive).toUpperCase().trim() 
+            : null;
+        const primitive = inputPrimitive && PRIMITIVAS_VALIDAS.has(inputPrimitive) ? inputPrimitive : null;
 
         let whereClauses = [];
         let queryParams = [];
@@ -519,6 +548,17 @@ app.get('/api/threats', async (req, res) => {
         console.error("[-] Erro ao listar catálogo de ameaças:", error.message);
         res.status(500).json({ error: "Erro interno no servidor" });
     }
+});
+
+// Middleware 404 para rotas não encontradas (Retorno padronizado em JSON)
+app.use((req, res) => {
+    res.status(404).json({ error: "Endpoint não encontrado" });
+});
+
+// Middleware de Tratamento Global de Erros (Prevenção de Stack Trace Leak)
+app.use((err, req, res, next) => {
+    console.error("[-] Erro não tratado na aplicação:", err.message);
+    res.status(err.status || 500).json({ error: "Erro interno no servidor" });
 });
 
 app.listen(port, () => {
