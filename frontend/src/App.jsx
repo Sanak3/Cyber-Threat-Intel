@@ -31,7 +31,10 @@ const CustomSeverityTooltip = ({ active, payload }) => {
 }
 
 function App() {
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
+  const PROD_API_URL = 'https://cyber-threat-intel-mmks.onrender.com'
+  const [apiUrl, setApiUrl] = useState(() => {
+    return import.meta.env.VITE_API_URL || PROD_API_URL
+  })
 
   // 1. Estados de Telemetria e Analytics Globais (Instant Hydration no F5 via sessionStorage)
   const [apiStatus, setApiStatus] = useState('ONLINE')
@@ -191,13 +194,30 @@ function App() {
     let isMounted = true
 
     const carregarAnalytics = async () => {
+      let activeUrl = apiUrl
       try {
-        const [healthRes, analyticsRes, chainsRes, clustersRes] = await Promise.allSettled([
-          axios.get(`${API_URL}/api/health`),
-          axios.get(`${API_URL}/api/threats/analytics`),
-          axios.get(`${API_URL}/api/threats/chains`),
-          axios.get(`${API_URL}/api/threats/clusters`)
+        let [healthRes, analyticsRes, chainsRes, clustersRes] = await Promise.allSettled([
+          axios.get(`${activeUrl}/api/health`, { timeout: 3500 }),
+          axios.get(`${activeUrl}/api/threats/analytics`, { timeout: 5000 }),
+          axios.get(`${activeUrl}/api/threats/chains`, { timeout: 5000 }),
+          axios.get(`${activeUrl}/api/threats/clusters`, { timeout: 5000 })
         ])
+
+        // Se o endpoint local falhar (ex: rodando apenas npm run dev sem backend local), tenta fallback no Render
+        if (healthRes.status !== 'fulfilled' && activeUrl.includes('localhost')) {
+          activeUrl = PROD_API_URL
+          setApiUrl(PROD_API_URL)
+          const retries = await Promise.allSettled([
+            axios.get(`${activeUrl}/api/health`, { timeout: 8000 }),
+            axios.get(`${activeUrl}/api/threats/analytics`, { timeout: 8000 }),
+            axios.get(`${activeUrl}/api/threats/chains`, { timeout: 8000 }),
+            axios.get(`${activeUrl}/api/threats/clusters`, { timeout: 8000 })
+          ])
+          healthRes = retries[0]
+          analyticsRes = retries[1]
+          chainsRes = retries[2]
+          clustersRes = retries[3]
+        }
 
         if (!isMounted) return
 
@@ -242,6 +262,7 @@ function App() {
         }
       } catch (err) {
         console.error('[-] Erro ao carregar analytics do SOC:', err)
+        setDbConectado(false)
       }
     }
 
@@ -250,7 +271,7 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [API_URL])
+  }, [apiUrl])
 
   // ---------------------------------------------------------------------------
   // EFEITO 3: Consulta Server-Side com GIN Full-Text Search e Cache de Página 1
@@ -276,7 +297,7 @@ function App() {
           params.severity = filtroSeveridade
         }
 
-        const res = await axios.get(`${API_URL}/api/threats`, {
+        const res = await axios.get(`${apiUrl}/api/threats`, {
           params,
           signal: controller.signal
         })
@@ -321,7 +342,7 @@ function App() {
       isMounted = false
       controller.abort()
     }
-  }, [API_URL, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade])
+  }, [apiUrl, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade])
 
   // ---------------------------------------------------------------------------
   // AÇÕES DE NAVEGAÇÃO E EXPANSÃO ACCORDION
@@ -659,11 +680,13 @@ function App() {
                   <div className="tech-ranking-info">
                     <span className="tech-ranking-name">
                       {tech.nome}
-                      <span className="tech-chain-badge">Chains ➔</span>
                     </span>
-                    <span className="tech-ranking-count" style={{ color: tech.cor }}>
-                      {tech.total.toLocaleString('pt-BR')} CVEs
-                    </span>
+                    <div className="tech-ranking-right">
+                      <span className="tech-chain-tag">Chains 🔗</span>
+                      <span className="tech-ranking-count" style={{ color: tech.cor }}>
+                        {tech.total.toLocaleString('pt-BR')} CVEs
+                      </span>
+                    </div>
                   </div>
                   <div className="tech-progress-bg">
                     <div
