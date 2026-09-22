@@ -1906,3 +1906,368 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+/* ==============================================================================
+   INTERATIVIDADE DOS ECOSSISTEMAS & TELEMETRIA DE CHAINS
+   ============================================================================== */
+.status-badge-btn {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.status-badge-btn:hover {
+  border-color: rgba(168, 85, 247, 0.5);
+  background: rgba(168, 85, 247, 0.12);
+  transform: translateY(-1px);
+}
+
+.led-chains {
+  background-color: #a855f7;
+  box-shadow: 0 0 10px #a855f7, 0 0 16px #a855f7;
+  animation: pulsePurple 2s infinite ease-in-out;
+}
+
+.status-chains-val {
+  color: #c084fc;
+}
+
+@keyframes pulsePurple {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.9); }
+}
+
+.quick-nav-chains {
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #c084fc;
+  cursor: pointer;
+}
+
+.quick-nav-chains:hover {
+  background: rgba(168, 85, 247, 0.15);
+  border-color: #a855f7;
+  color: #ffffff;
+}
+
+.analytics-chains-shortcut {
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  color: #c084fc;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.analytics-chains-shortcut:hover {
+  background: rgba(168, 85, 247, 0.25);
+  border-color: #a855f7;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+  color: #ffffff;
+}
+
+/* Itens de Ecossistemas Clicáveis */
+.tech-clickable {
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.tech-clickable:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(0, 212, 255, 0.3);
+  transform: translateX(4px);
+}
+
+.tech-chain-badge {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  color: #00d4ff;
+  opacity: 0.8;
+  margin-left: 0.4rem;
+  font-weight: 700;
+  transition: opacity 0.2s;
+}
+
+.tech-clickable:hover .tech-chain-badge {
+  opacity: 1;
+  color: #00ff88;
+}
+
+/* ==============================================================================
+   MODAL DE EXPLOIT CHAINS & WRITEUP BLUEPRINTS
+   ============================================================================== */
+.chains-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(4, 8, 18, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  animation: fadeInModal 0.2s ease-out;
+}
+
+@keyframes fadeInModal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.chains-modal-content {
+  max-width: 1280px;
+  width: 100%;
+  max-height: 90vh;
+  background: #090e1c;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  border-radius: 14px;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.85), 0 0 40px rgba(168, 85, 247, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  animation: slideUpModal 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideUpModal {
+  from { transform: translateY(20px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.chains-modal-content::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #a855f7, #ff0055, #00d4ff, transparent);
+}
+
+.chains-modal-header {
+  padding: 1.25rem 1.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.chains-modal-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.modal-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.modal-prefix {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #a855f7;
+  letter-spacing: 1px;
+}
+
+.modal-count-badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 0, 85, 0.15);
+  color: #ff3366;
+  border: 1px solid rgba(255, 0, 85, 0.35);
+}
+
+.chains-modal-title {
+  font-family: var(--font-mono);
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.chains-modal-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.btn-close-modal {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-main);
+  padding: 0.4rem 0.85rem;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-close-modal:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #ffffff;
+}
+
+/* Filtros por Ecossistema no Topo do Modal */
+.modal-eco-filters {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.85rem 1.75rem;
+  background: rgba(10, 15, 29, 0.7);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.eco-filter-btn {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-cyber);
+  color: var(--text-dim);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.eco-filter-btn:hover {
+  color: var(--text-main);
+  border-color: rgba(168, 85, 247, 0.4);
+}
+
+.eco-filter-btn.active {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: #a855f7;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+}
+
+/* Corpo do Modal em Split-View */
+.chains-modal-body {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 1.25rem;
+  padding: 1.5rem 1.75rem;
+  overflow-y: auto;
+  flex: 1;
+  max-height: calc(90vh - 150px);
+}
+
+@media (max-width: 900px) {
+  .chains-modal-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chains-sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  max-height: 100%;
+  padding-right: 0.4rem;
+  scrollbar-width: thin;
+}
+
+.sidebar-list-title {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.chain-sidebar-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--border-cyber);
+  border-radius: 8px;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chain-sidebar-card:hover {
+  border-color: rgba(168, 85, 247, 0.4);
+  background: rgba(168, 85, 247, 0.08);
+  transform: translateX(3px);
+}
+
+.chain-sidebar-card.is-selected {
+  border-color: #a855f7;
+  background: rgba(168, 85, 247, 0.15);
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.25);
+}
+
+.chain-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chain-card-badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+}
+
+.chain-card-score {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #ff0055;
+}
+
+.chain-card-tech {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.chain-card-cves {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: #00d4ff;
+  word-break: break-all;
+}
+
+.chains-empty-sidebar, .no-chain-selected {
+  padding: 2rem;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.chains-detail-panel {
+  overflow-y: auto;
+}
+
+.writeup-chain-id {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+

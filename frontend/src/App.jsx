@@ -96,10 +96,64 @@ function App() {
   const [mostrarVoltarTopo, setMostrarVoltarTopo] = useState(false)
   const threatTableRef = useRef(null)
 
+  // Estados e controle do Modal de Exploit Chains
+  const [modalChainsAberto, setModalChainsAberto] = useState(false)
+  const [filtroEcoChain, setFiltroEcoChain] = useState('TODOS')
+
+  const ecossistemasDisponiveis = useMemo(() => {
+    const setEcos = new Set()
+    exploitChains.forEach((c) => {
+      if (c.tecnologia && c.tecnologia !== 'Desconhecido / Geral') {
+        setEcos.add(c.tecnologia)
+      }
+    })
+    return Array.from(setEcos)
+  }, [exploitChains])
+
+  const chainsFiltradas = useMemo(() => {
+    if (!exploitChains || exploitChains.length === 0) return []
+    if (filtroEcoChain === 'TODOS') return exploitChains
+    return exploitChains.filter((c) =>
+      String(c.tecnologia || '').toLowerCase().includes(filtroEcoChain.toLowerCase()) ||
+      filtroEcoChain.toLowerCase().includes(String(c.tecnologia || '').toLowerCase())
+    )
+  }, [exploitChains, filtroEcoChain])
+
   const activeChain = useMemo(() => {
-    if (!exploitChains || exploitChains.length === 0) return null
-    return exploitChains.find((c) => c.chain_id === selectedChainId) || exploitChains[0]
-  }, [exploitChains, selectedChainId])
+    if (!chainsFiltradas || chainsFiltradas.length === 0) {
+      return exploitChains && exploitChains.length > 0 ? exploitChains[0] : null
+    }
+    return chainsFiltradas.find((c) => c.chain_id === selectedChainId) || chainsFiltradas[0]
+  }, [chainsFiltradas, selectedChainId, exploitChains])
+
+  const abrirModalPorEcossistema = (techNome) => {
+    setFiltroEcoChain(techNome)
+    setModalChainsAberto(true)
+    if (exploitChains && exploitChains.length > 0) {
+      const match = exploitChains.find((c) =>
+        String(c.tecnologia || '').toLowerCase().includes(techNome.toLowerCase()) ||
+        techNome.toLowerCase().includes(String(c.tecnologia || '').toLowerCase())
+      )
+      if (match) {
+        setSelectedChainId(match.chain_id)
+      } else {
+        setSelectedChainId(exploitChains[0].chain_id)
+      }
+    }
+  }
+
+  // Listener para fechar o modal com a tecla ESC
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setModalChainsAberto(false)
+      }
+    }
+    if (modalChainsAberto) {
+      window.addEventListener('keydown', handleKeyDown)
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [modalChainsAberto])
 
   // ---------------------------------------------------------------------------
   // EFEITO 1: Debounce de 400ms no termo de busca (Full-Text Search)
@@ -405,6 +459,20 @@ function App() {
             <span className="status-label">AWS RDS PG:</span>
             <span className="status-value">{dbConectado ? 'CONECTADO' : 'DESCONECTADO'}</span>
           </div>
+
+          <button
+            type="button"
+            className="status-badge status-badge-btn"
+            onClick={() => {
+              setFiltroEcoChain('TODOS')
+              setModalChainsAberto(true)
+            }}
+            title="Abrir Exploit Chains e Blueprints de Ataque"
+          >
+            <span className="led-indicator led-chains" />
+            <span className="status-label">EXPLOIT CHAINS:</span>
+            <span className="status-value status-chains-val">{exploitChains.length}</span>
+          </button>
         </div>
       </header>
 
@@ -424,6 +492,17 @@ function App() {
         <a href="#feed-cves" className="quick-nav-pill">
           Feed CVEs
         </a>
+        <button
+          type="button"
+          className="quick-nav-pill quick-nav-chains"
+          onClick={() => {
+            setFiltroEcoChain('TODOS')
+            setModalChainsAberto(true)
+          }}
+          title="Ver Exploit Chains Correlacionadas"
+        >
+          ⚡ Exploit Chains ({exploitChains.length})
+        </button>
       </nav>
 
       {/* --------------------------------------------------------------------
@@ -547,15 +626,41 @@ function App() {
               <span className="section-title-prefix">&gt;_</span>
               <span>ECOSSISTEMAS MAIS AFETADOS</span>
             </h3>
-            <span className="analytics-badge">VENDORS / SO</span>
+            <button
+              type="button"
+              className="analytics-chains-shortcut"
+              onClick={() => {
+                setFiltroEcoChain('TODOS')
+                setModalChainsAberto(true)
+              }}
+              title="Abrir Exploit Chains correlacionadas"
+            >
+              <span>CHAINS 🔗</span>
+            </button>
           </div>
           <div className="tech-ranking-list">
             {analyticsData.topTecnologias.map((tech) => {
               const porcentagem = Math.round((tech.total / maxTechCount) * 100)
               return (
-                <div key={tech.nome} className="tech-ranking-item">
+                <div
+                  key={tech.nome}
+                  className="tech-ranking-item tech-clickable"
+                  onClick={() => abrirModalPorEcossistema(tech.nome)}
+                  role="button"
+                  tabIndex={0}
+                  title={`Clique para explorar as Exploit Chains de ${tech.nome}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      abrirModalPorEcossistema(tech.nome)
+                    }
+                  }}
+                >
                   <div className="tech-ranking-info">
-                    <span className="tech-ranking-name">{tech.nome}</span>
+                    <span className="tech-ranking-name">
+                      {tech.nome}
+                      <span className="tech-chain-badge">Chains ➔</span>
+                    </span>
                     <span className="tech-ranking-count" style={{ color: tech.cor }}>
                       {tech.total.toLocaleString('pt-BR')} CVEs
                     </span>
@@ -572,96 +677,6 @@ function App() {
           </div>
         </div>
       </section>
-
-      {/* --------------------------------------------------------------------
-          3.5. DETECTOR DE EXPLOIT CHAINS (AI & DIRECTED GRAPH BLUEPRINTS)
-          -------------------------------------------------------------------- */}
-      {exploitChains && exploitChains.length > 0 && activeChain && (
-        <section className="exploit-chains-card">
-          <div className="section-header">
-            <div className="section-header-left">
-              <h2 className="section-title">
-                <span className="section-title-prefix">&gt;_</span>
-                <span>CADEIAS DE ATAQUE CORRELACIONADAS // EXPLOIT CHAINS & WRITEUP BLUEPRINTS</span>
-              </h2>
-              <span className="chains-badge-count">{exploitChains.length} Chains Ativas</span>
-            </div>
-          </div>
-
-          {/* Seletor de Chains em Abas */}
-          <div className="chains-selector-bar">
-            {exploitChains.map((chain) => (
-              <button
-                key={chain.chain_id}
-                type="button"
-                className={`chain-tab-btn ${chain.chain_id === activeChain.chain_id ? 'active' : ''}`}
-                onClick={() => setSelectedChainId(chain.chain_id)}
-              >
-                <span className={`chain-tab-badge ${chain.severidade === 'CRITICAL' ? 'badge-critical' : 'badge-high'}`}>
-                  {chain.severidade}
-                </span>
-                <span className="chain-tab-title">{chain.tecnologia}</span>
-                <span className="chain-tab-id">({chain.chain_id})</span>
-              </button>
-            ))}
-          </div>
-
-          {activeChain.writeup && (
-            <div className="writeup-blueprint-container">
-              <div className="writeup-header">
-                <div className="writeup-title-block">
-                  <div className="writeup-badge-row">
-                    <span className="writeup-label">WRITEUP BLUEPRINT (AI GRAPH ENGINE)</span>
-                    <span className="writeup-target-tag">ALVO: {activeChain.tecnologia}</span>
-                  </div>
-                  <h3 className="writeup-title">{activeChain.writeup.titulo}</h3>
-                  <p className="writeup-summary">{activeChain.writeup.resumo_executivo}</p>
-                </div>
-                <div className="writeup-score-block">
-                  <span className="writeup-score-title">SCORE COMPOSTO</span>
-                  <span className="writeup-score-number">{Number(activeChain.score_cvss || 10.0).toFixed(1)}</span>
-                  <span className="writeup-score-sub">{activeChain.severidade} RISK</span>
-                </div>
-              </div>
-
-              {/* Fluxo Visual Sequencial de Nós da Cadeia */}
-              <div className="chain-steps-flow">
-                {activeChain.writeup.passos_ataque && activeChain.writeup.passos_ataque.map((passo, idx) => (
-                  <div key={idx} className="chain-step-node">
-                    <div className="step-node-header">
-                      <span className="step-badge">PASSO {passo.passo}</span>
-                      <span className="step-cve-id">{passo.cve_id}</span>
-                      <span className={`step-primitive-pill primitive-${String(passo.primitiva || '').toLowerCase()}`}>
-                        {passo.primitiva}
-                      </span>
-                    </div>
-                    <div className="step-action-text">{passo.acao}</div>
-                    <div className="step-detail-text">{passo.detalhe}</div>
-                    {idx < activeChain.writeup.passos_ataque.length - 1 && (
-                      <div className="step-flow-arrow">➔</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div className="writeup-footer-grid">
-                <div className="writeup-impact-box">
-                  <div className="footer-box-title">⚡ IMPACTO TÉCNICO CONSOLIDADO</div>
-                  <div className="footer-box-content">{activeChain.writeup.impacto_tecnico}</div>
-                </div>
-                <div className="writeup-mitigation-box">
-                  <div className="footer-box-title">🛡️ MITIGAÇÕES RECOMENDADAS PELO SOC</div>
-                  <ul className="footer-box-list">
-                    {activeChain.writeup.mitigacoes_recomendadas && activeChain.writeup.mitigacoes_recomendadas.map((mit, i) => (
-                      <li key={i}>{mit}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-      )}
 
       {/* --------------------------------------------------------------------
           4. CAMPO DE BUSCA FULL-TEXT SEARCH & FILTROS EM TEMPO REAL
@@ -1028,6 +1043,182 @@ function App() {
           <span className="floating-top-arrow">▲</span>
           <span className="floating-top-label">TOPO</span>
         </button>
+      )}
+
+      {/* --------------------------------------------------------------------
+          8. MODAL DE EXPLOIT CHAINS & WRITEUP BLUEPRINTS (IA & NETWORKX)
+          -------------------------------------------------------------------- */}
+      {modalChainsAberto && (
+        <div
+          className="chains-modal-overlay"
+          onClick={() => setModalChainsAberto(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="chains-modal-content"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Cabeçalho do Modal */}
+            <div className="chains-modal-header">
+              <div className="chains-modal-title-group">
+                <div className="modal-badge-row">
+                  <span className="modal-prefix">&gt;_ INTELLIGENCE ENGINE</span>
+                  <span className="modal-count-badge">{chainsFiltradas.length} Cadeias Detectadas</span>
+                </div>
+                <h2 className="chains-modal-title">
+                  EXPLOIT CHAINS &amp; WRITEUP BLUEPRINTS
+                </h2>
+                <span className="chains-modal-subtitle">
+                  Cadeias de ataque correlacionadas via Grafos Direcionados (NetworkX) e NLP Tático
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn-close-modal"
+                onClick={() => setModalChainsAberto(false)}
+                title="Fechar (ESC)"
+              >
+                ✕ Fechar
+              </button>
+            </div>
+
+            {/* Barra de Filtro por Ecossistema */}
+            <div className="modal-eco-filters">
+              <button
+                type="button"
+                className={`eco-filter-btn ${filtroEcoChain === 'TODOS' ? 'active' : ''}`}
+                onClick={() => setFiltroEcoChain('TODOS')}
+              >
+                TODOS ({exploitChains.length})
+              </button>
+              {ecossistemasDisponiveis.map((eco) => {
+                const count = exploitChains.filter((c) =>
+                  String(c.tecnologia || '').toLowerCase().includes(eco.toLowerCase()) ||
+                  eco.toLowerCase().includes(String(c.tecnologia || '').toLowerCase())
+                ).length
+                return (
+                  <button
+                    key={eco}
+                    type="button"
+                    className={`eco-filter-btn ${filtroEcoChain === eco ? 'active' : ''}`}
+                    onClick={() => setFiltroEcoChain(eco)}
+                  >
+                    {eco} ({count})
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Corpo do Modal: Split-View */}
+            <div className="chains-modal-body">
+              {/* Coluna Esquerda: Lista de Cadeias */}
+              <div className="chains-sidebar-list">
+                <div className="sidebar-list-title">
+                  CADEIAS ({chainsFiltradas.length})
+                </div>
+                {chainsFiltradas.length > 0 ? (
+                  chainsFiltradas.map((chain) => {
+                    const isSelected = activeChain && activeChain.chain_id === chain.chain_id
+                    return (
+                      <div
+                        key={chain.chain_id}
+                        className={`chain-sidebar-card ${isSelected ? 'is-selected' : ''}`}
+                        onClick={() => setSelectedChainId(chain.chain_id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            setSelectedChainId(chain.chain_id)
+                          }
+                        }}
+                      >
+                        <div className="chain-card-header">
+                          <span className={`chain-card-badge ${chain.severidade === 'CRITICAL' ? 'badge-critical' : 'badge-high'}`}>
+                            {chain.severidade}
+                          </span>
+                          <span className="chain-card-score">{Number(chain.score_cvss || 10.0).toFixed(1)}</span>
+                        </div>
+                        <div className="chain-card-tech">{chain.tecnologia}</div>
+                        <div className="chain-card-cves">
+                          {(chain.cves || []).join(' ➔ ')}
+                        </div>
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="chains-empty-sidebar">
+                    Nenhuma cadeia encontrada para este filtro.
+                  </div>
+                )}
+              </div>
+
+              {/* Coluna Direita: Writeup Blueprint Detalhado */}
+              <div className="chains-detail-panel">
+                {activeChain && activeChain.writeup ? (
+                  <div className="writeup-blueprint-container">
+                    <div className="writeup-header">
+                      <div className="writeup-title-block">
+                        <div className="writeup-badge-row">
+                          <span className="writeup-label">WRITEUP BLUEPRINT</span>
+                          <span className="writeup-target-tag">ALVO: {activeChain.tecnologia}</span>
+                          <span className="writeup-chain-id">ID: {activeChain.chain_id}</span>
+                        </div>
+                        <h3 className="writeup-title">{activeChain.writeup.titulo}</h3>
+                        <p className="writeup-summary">{activeChain.writeup.resumo_executivo}</p>
+                      </div>
+                      <div className="writeup-score-block">
+                        <span className="writeup-score-title">SCORE COMPOSTO</span>
+                        <span className="writeup-score-number">{Number(activeChain.score_cvss || 10.0).toFixed(1)}</span>
+                        <span className="writeup-score-sub">{activeChain.severidade} RISK</span>
+                      </div>
+                    </div>
+
+                    {/* Fluxo Visual Sequencial de Nós da Cadeia */}
+                    <div className="chain-steps-flow">
+                      {activeChain.writeup.passos_ataque && activeChain.writeup.passos_ataque.map((passo, idx) => (
+                        <div key={idx} className="chain-step-node">
+                          <div className="step-node-header">
+                            <span className="step-badge">PASSO {passo.passo}</span>
+                            <span className="step-cve-id">{passo.cve_id}</span>
+                            <span className={`step-primitive-pill primitive-${String(passo.primitiva || '').toLowerCase()}`}>
+                              {passo.primitiva}
+                            </span>
+                          </div>
+                          <div className="step-action-text">{passo.acao}</div>
+                          <div className="step-detail-text">{passo.detalhe}</div>
+                          {idx < activeChain.writeup.passos_ataque.length - 1 && (
+                            <div className="step-flow-arrow">➔</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="writeup-footer-grid">
+                      <div className="writeup-impact-box">
+                        <div className="footer-box-title">⚡ IMPACTO TÉCNICO CONSOLIDADO</div>
+                        <div className="footer-box-content">{activeChain.writeup.impacto_tecnico}</div>
+                      </div>
+                      <div className="writeup-mitigation-box">
+                        <div className="footer-box-title">🛡️ MITIGAÇÕES RECOMENDADAS PELO SOC</div>
+                        <ul className="footer-box-list">
+                          {activeChain.writeup.mitigacoes_recomendadas && activeChain.writeup.mitigacoes_recomendadas.map((mit, i) => (
+                            <li key={i}>{mit}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="no-chain-selected">
+                    Selecione uma cadeia na lista lateral para visualizar o Writeup Blueprint.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
