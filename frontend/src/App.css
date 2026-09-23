@@ -138,6 +138,12 @@
   animation: pulseGreen 2s infinite ease-in-out;
 }
 
+.led-yellow {
+  background-color: var(--medium-amber);
+  box-shadow: 0 0 10px var(--medium-amber), 0 0 16px var(--medium-amber);
+  animation: pulseYellow 1.5s infinite ease-in-out;
+}
+
 .led-red {
   background-color: var(--critical-red);
   box-shadow: 0 0 10px var(--critical-red), 0 0 16px var(--critical-red);
@@ -147,6 +153,11 @@
 @keyframes pulseGreen {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.45; transform: scale(0.9); }
+}
+
+@keyframes pulseYellow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.9); }
 }
 
 @keyframes pulseRed {

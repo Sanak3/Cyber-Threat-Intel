@@ -114,6 +114,7 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         create_indexes_query = """
         CREATE INDEX IF NOT EXISTS idx_threats_cvss_data ON threats (nota_cvss DESC, data_extracao DESC);
         CREATE INDEX IF NOT EXISTS idx_threats_severidade ON threats (severidade);
+        CREATE INDEX IF NOT EXISTS idx_threats_tecnologia ON threats (tecnologia);
         CREATE INDEX IF NOT EXISTS idx_threats_cluster ON threats (cluster_label);
         CREATE INDEX IF NOT EXISTS idx_threats_primitiva ON threats (primitiva);
         CREATE INDEX IF NOT EXISTS idx_threats_fts ON threats USING GIN (to_tsvector('english', coalesce(descricao, '')));

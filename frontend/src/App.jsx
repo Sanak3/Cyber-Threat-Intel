@@ -36,24 +36,48 @@ function App() {
     return import.meta.env.VITE_API_URL || PROD_API_URL
   })
 
-  // 1. Estados de Telemetria e Analytics Globais (Instant Hydration no F5 via sessionStorage)
-  const [apiStatus, setApiStatus] = useState('ONLINE')
-  const [dbConectado, setDbConectado] = useState(true)
-  const [exploitChains, setExploitChains] = useState([])
-  const [selectedChainId, setSelectedChainId] = useState(null)
-  const [clustersData, setClustersData] = useState({ clusters: [], primitivas: [] })
-  const [analyticsData, setAnalyticsData] = useState(() => {
+  // Leitura segura do cache local consolidado para renderização instantânea (0ms)
+  const cachedOverview = useMemo(() => {
     try {
-      const cached = sessionStorage.getItem('cti_analytics_cache')
-      if (cached) return JSON.parse(cached)
+      const item = localStorage.getItem('cti_overview_cache') || sessionStorage.getItem('cti_overview_cache')
+      if (item) return JSON.parse(item)
     } catch {
       // fallback gracioso
+    }
+    return null
+  }, [])
+
+  // 1. Estados de Telemetria e Analytics Globais (Instant Hydration via localStorage)
+  const [apiStatus, setApiStatus] = useState('ONLINE')
+  const [dbConectado, setDbConectado] = useState(true)
+  const [sincronizandoNuvem, setSincronizandoNuvem] = useState(false)
+  const [exploitChains, setExploitChains] = useState(() => {
+    return cachedOverview?.chains || []
+  })
+  const [selectedChainId, setSelectedChainId] = useState(() => {
+    return cachedOverview?.chains?.[0]?.chain_id || null
+  })
+  const [clustersData, setClustersData] = useState(() => {
+    return cachedOverview?.clusters || { clusters: [], primitivas: [] }
+  })
+  const [analyticsData, setAnalyticsData] = useState(() => {
+    if (cachedOverview?.stats) {
+      return {
+        stats: cachedOverview.stats,
+        topTecnologias: cachedOverview.topTecnologias || []
+      }
+    }
+    try {
+      const legacy = localStorage.getItem('cti_analytics_cache') || sessionStorage.getItem('cti_analytics_cache')
+      if (legacy) return JSON.parse(legacy)
+    } catch {
+      // fallback
     }
     return { stats: null, topTecnologias: [] }
   })
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(() => {
     try {
-      return sessionStorage.getItem('cti_last_sync') || null
+      return localStorage.getItem('cti_last_sync') || sessionStorage.getItem('cti_last_sync') || null
     } catch {
       return null
     }
@@ -61,8 +85,11 @@ function App() {
 
   // 2. Estados da Tabela Paginada no Servidor (Instant Hydration para Página 1)
   const [ameacas, setAmeacas] = useState(() => {
+    if (cachedOverview?.initialThreats?.dados) {
+      return cachedOverview.initialThreats.dados
+    }
     try {
-      const cached = sessionStorage.getItem('cti_threats_page1')
+      const cached = localStorage.getItem('cti_threats_page1') || sessionStorage.getItem('cti_threats_page1')
       if (cached) return JSON.parse(cached)
     } catch {
       // fallback gracioso
@@ -70,15 +97,23 @@ function App() {
     return []
   })
   const [totalRegistros, setTotalRegistros] = useState(() => {
+    if (cachedOverview?.initialThreats?.total) {
+      return Number(cachedOverview.initialThreats.total) || 0
+    }
     try {
-      const cached = sessionStorage.getItem('cti_total_registros')
+      const cached = localStorage.getItem('cti_total_registros') || sessionStorage.getItem('cti_total_registros')
       if (cached) return Number(cached) || 0
     } catch {
       return 0
     }
     return 0
   })
-  const [totalPaginas, setTotalPaginas] = useState(1)
+  const [totalPaginas, setTotalPaginas] = useState(() => {
+    if (cachedOverview?.initialThreats?.totalPaginas) {
+      return Number(cachedOverview.initialThreats.totalPaginas) || 1
+    }
+    return 1
+  })
   const [carregandoTabela, setCarregandoTabela] = useState(false)
 
   // 3. Estados de Filtros e Paginação
@@ -188,38 +223,109 @@ function App() {
   }, [])
 
   // ---------------------------------------------------------------------------
-  // EFEITO 3: Carga em Background de Telemetria e Analytics (Stale-While-Revalidate)
+  // EFEITO 3: Carga em Background de Telemetria e Overview Consolidado (Single Round-Trip)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true
 
-    const carregarAnalytics = async () => {
+    const carregarTelemetriaEOverview = async () => {
       let activeUrl = apiUrl
-      try {
-        let [healthRes, analyticsRes, chainsRes, clustersRes] = await Promise.allSettled([
-          axios.get(`${activeUrl}/api/health`, { timeout: 3500 }),
-          axios.get(`${activeUrl}/api/threats/analytics`, { timeout: 5000 }),
-          axios.get(`${activeUrl}/api/threats/chains`, { timeout: 5000 }),
-          axios.get(`${activeUrl}/api/threats/clusters`, { timeout: 5000 })
-        ])
+      setSincronizandoNuvem(true)
 
-        // Se o endpoint local falhar (ex: rodando apenas npm run dev sem backend local), tenta fallback no Render
-        if (healthRes.status !== 'fulfilled' && activeUrl.includes('localhost')) {
-          activeUrl = PROD_API_URL
-          setApiUrl(PROD_API_URL)
-          const retries = await Promise.allSettled([
-            axios.get(`${activeUrl}/api/health`, { timeout: 8000 }),
-            axios.get(`${activeUrl}/api/threats/analytics`, { timeout: 8000 }),
-            axios.get(`${activeUrl}/api/threats/chains`, { timeout: 8000 }),
-            axios.get(`${activeUrl}/api/threats/clusters`, { timeout: 8000 })
-          ])
-          healthRes = retries[0]
-          analyticsRes = retries[1]
-          chainsRes = retries[2]
-          clustersRes = retries[3]
+      try {
+        // 1. Tenta a rota consolidada de alta velocidade (/api/threats/overview)
+        try {
+          const overviewRes = await axios.get(`${activeUrl}/api/threats/overview`, { timeout: 25000 })
+          if (overviewRes.data && overviewRes.data.status === 'OK') {
+            if (!isMounted) return
+            const data = overviewRes.data
+
+            setApiStatus('ONLINE')
+            setDbConectado(true)
+            setSincronizandoNuvem(false)
+
+            const novoPayload = {
+              stats: data.stats || null,
+              topTecnologias: data.topTecnologias || []
+            }
+            setAnalyticsData(novoPayload)
+
+            if (Array.isArray(data.chains) && data.chains.length > 0) {
+              setExploitChains(data.chains)
+              setSelectedChainId((prev) => prev || data.chains[0].chain_id)
+            }
+
+            if (data.clusters) {
+              setClustersData(data.clusters)
+            }
+
+            if (data.initialThreats?.dados && paginaAtual === 1 && !debouncedBusca && filtroSeveridade === 'TODOS') {
+              setAmeacas(data.initialThreats.dados)
+              setTotalRegistros(Number(data.initialThreats.total) || 0)
+              setTotalPaginas(Math.max(1, Number(data.initialThreats.totalPaginas) || 1))
+            }
+
+            const horaFormatada = new Date().toLocaleTimeString('pt-BR')
+            setUltimaAtualizacao(horaFormatada)
+
+            try {
+              localStorage.setItem('cti_overview_cache', JSON.stringify(data))
+              localStorage.setItem('cti_last_sync', horaFormatada)
+            } catch {
+              // ignore storage errors
+            }
+            return
+          }
+        } catch (overviewErr) {
+          // Se falhar no localhost, tenta fallback para a URL de produção na nuvem
+          if (activeUrl.includes('localhost')) {
+            activeUrl = PROD_API_URL
+            setApiUrl(PROD_API_URL)
+            try {
+              const prodOverview = await axios.get(`${PROD_API_URL}/api/threats/overview`, { timeout: 25000 })
+              if (prodOverview.data && prodOverview.data.status === 'OK') {
+                if (!isMounted) return
+                const data = prodOverview.data
+                setApiStatus('ONLINE')
+                setDbConectado(true)
+                setSincronizandoNuvem(false)
+                setAnalyticsData({ stats: data.stats || null, topTecnologias: data.topTecnologias || [] })
+                if (Array.isArray(data.chains) && data.chains.length > 0) {
+                  setExploitChains(data.chains)
+                  setSelectedChainId((prev) => prev || data.chains[0].chain_id)
+                }
+                if (data.clusters) setClustersData(data.clusters)
+                if (data.initialThreats?.dados && paginaAtual === 1 && !debouncedBusca && filtroSeveridade === 'TODOS') {
+                  setAmeacas(data.initialThreats.dados)
+                  setTotalRegistros(Number(data.initialThreats.total) || 0)
+                  setTotalPaginas(Math.max(1, Number(data.initialThreats.totalPaginas) || 1))
+                }
+                const hora = new Date().toLocaleTimeString('pt-BR')
+                setUltimaAtualizacao(hora)
+                try {
+                  localStorage.setItem('cti_overview_cache', JSON.stringify(data))
+                  localStorage.setItem('cti_last_sync', hora)
+                } catch {
+                  // ignore
+                }
+                return
+              }
+            } catch {
+              // segue para fallback nos endpoints individuais
+            }
+          }
         }
 
+        // 2. Fallback resiliente: consulta endpoints individuais caso o servidor esteja em deploy
+        let [healthRes, analyticsRes, chainsRes, clustersRes] = await Promise.allSettled([
+          axios.get(`${activeUrl}/api/health`, { timeout: 15000 }),
+          axios.get(`${activeUrl}/api/threats/analytics`, { timeout: 15000 }),
+          axios.get(`${activeUrl}/api/threats/chains`, { timeout: 15000 }),
+          axios.get(`${activeUrl}/api/threats/clusters`, { timeout: 15000 })
+        ])
+
         if (!isMounted) return
+        setSincronizandoNuvem(false)
 
         if (healthRes.status === 'fulfilled') {
           setApiStatus(healthRes.value.data.status === 'OK' ? 'ONLINE' : 'DEGRADADO')
@@ -239,12 +345,11 @@ function App() {
           const horaFormatada = new Date().toLocaleTimeString('pt-BR')
           setUltimaAtualizacao(horaFormatada)
 
-          // Persiste no cache da sessão para carregamento instantâneo no F5
           try {
-            sessionStorage.setItem('cti_analytics_cache', JSON.stringify(novoPayload))
-            sessionStorage.setItem('cti_last_sync', horaFormatada)
+            localStorage.setItem('cti_analytics_cache', JSON.stringify(novoPayload))
+            localStorage.setItem('cti_last_sync', horaFormatada)
           } catch {
-            // ignore storage full
+            // ignore
           }
         } else {
           setDbConectado(false)
@@ -261,27 +366,39 @@ function App() {
           setClustersData(clustersRes.value.data)
         }
       } catch (err) {
-        console.error('[-] Erro ao carregar analytics do SOC:', err)
+        console.error('[-] Erro ao carregar telemetria da API:', err)
         setDbConectado(false)
+        setSincronizandoNuvem(false)
       }
     }
 
-    carregarAnalytics()
+    carregarTelemetriaEOverview()
+
+    // Keep-alive silencioso: ping a cada 9 minutos para manter a instância do Render ativa enquanto a aba estiver aberta
+    const keepAliveTimer = setInterval(() => {
+      axios.get(`${apiUrl}/api/health`).catch(() => {})
+    }, 9 * 60 * 1000)
 
     return () => {
       isMounted = false
+      clearInterval(keepAliveTimer)
     }
   }, [apiUrl])
 
   // ---------------------------------------------------------------------------
-  // EFEITO 3: Consulta Server-Side com GIN Full-Text Search e Cache de Página 1
+  // EFEITO 4: Consulta Server-Side com GIN Full-Text Search e Cache de Página 1
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true
     const controller = new AbortController()
 
     const carregarAmeacasPaginadas = async () => {
-      setCarregandoTabela(true)
+      // Se já temos a página 1 em memória via cache instantâneo e não há busca/filtro ativa,
+      // não exibe spinner intrusivo
+      const temCacheValido = paginaAtual === 1 && !debouncedBusca && filtroSeveridade === 'TODOS' && ameacas.length > 0
+      if (!temCacheValido) {
+        setCarregandoTabela(true)
+      }
 
       try {
         const params = {
@@ -299,7 +416,8 @@ function App() {
 
         const res = await axios.get(`${apiUrl}/api/threats`, {
           params,
-          signal: controller.signal
+          signal: controller.signal,
+          timeout: 20000
         })
 
         if (!isMounted) return
@@ -314,11 +432,11 @@ function App() {
           setTotalRegistros(totalRecebido)
           setTotalPaginas(paginasRecebidas)
 
-          // Salva página padrão no cache para acelerar F5
+          // Salva página padrão no cache do localStorage para acelerar recargas futuras
           if (paginaAtual === 1 && !debouncedBusca && filtroSeveridade === 'TODOS') {
             try {
-              sessionStorage.setItem('cti_threats_page1', JSON.stringify(listaRecebida))
-              sessionStorage.setItem('cti_total_registros', String(totalRecebido))
+              localStorage.setItem('cti_threats_page1', JSON.stringify(listaRecebida))
+              localStorage.setItem('cti_total_registros', String(totalRecebido))
             } catch {
               // ignore
             }
@@ -470,15 +588,15 @@ function App() {
 
         <div className="header-telemetry">
           <div className="status-badge">
-            <span className={`led-indicator ${apiStatus === 'ONLINE' ? 'led-green' : 'led-red'}`} />
+            <span className={`led-indicator ${apiStatus === 'ONLINE' ? 'led-green' : sincronizandoNuvem ? 'led-yellow' : 'led-red'}`} />
             <span className="status-label">API EXPRESS:</span>
-            <span className="status-value">{apiStatus}</span>
+            <span className="status-value">{sincronizandoNuvem && apiStatus !== 'ONLINE' ? 'SINCRONIZANDO...' : apiStatus}</span>
           </div>
 
           <div className="status-badge">
-            <span className={`led-indicator ${dbConectado ? 'led-green' : 'led-red'}`} />
+            <span className={`led-indicator ${dbConectado ? 'led-green' : sincronizandoNuvem ? 'led-yellow' : 'led-red'}`} />
             <span className="status-label">AWS RDS PG:</span>
-            <span className="status-value">{dbConectado ? 'CONECTADO' : 'DESCONECTADO'}</span>
+            <span className="status-value">{dbConectado ? 'CONECTADO' : sincronizandoNuvem ? 'CONECTANDO...' : 'DESCONECTADO'}</span>
           </div>
 
           <button

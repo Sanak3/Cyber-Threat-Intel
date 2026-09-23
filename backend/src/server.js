@@ -64,116 +64,25 @@ const memoryCache = {
     analytics: { data: null, expiresAt: 0 },
     stats: { data: null, expiresAt: 0 },
     chains: { data: null, expiresAt: 0 },
-    clusters: { data: null, expiresAt: 0 }
+    clusters: { data: null, expiresAt: 0 },
+    overview: { data: null, expiresAt: 0 },
+    defaultThreats: {}
 };
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos de cache em memória (RAM)
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora de cache em memória (RAM)
 
-// -----------------------------------------------------------------------------
-// ROTAS DA API
-// -----------------------------------------------------------------------------
-
-// Rota de Healthcheck
-app.get('/api/health', (req, res) => {
-    res.json({ status: 'OK', message: 'Cyber Threat API rodando com sucesso!' });
-});
-
-// Rota 1: Resumo Estatístico Consolidado (Com Cache TTL em RAM)
-app.get('/api/threats/stats', async (req, res) => {
-    try {
-        const agora = Date.now();
-        if (memoryCache.stats.data && agora < memoryCache.stats.expiresAt) {
-            res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-            return res.json(memoryCache.stats.data);
-        }
-
-        const query = `
-            SELECT 
-                COUNT(*) as total_ameacas,
-                SUM(CASE WHEN nota_cvss >= 9.0 THEN 1 ELSE 0 END) as criticas,
-                SUM(CASE WHEN nota_cvss >= 7.0 AND nota_cvss < 9.0 THEN 1 ELSE 0 END) as altas,
-                SUM(CASE WHEN nota_cvss >= 4.0 AND nota_cvss < 7.0 THEN 1 ELSE 0 END) as medias,
-                SUM(CASE WHEN nota_cvss > 0.0 AND nota_cvss < 4.0 THEN 1 ELSE 0 END) as baixas,
-                MAX(nota_cvss) as pior_risco
-            FROM threats;
-        `;
-        const { rows } = await pool.query(query);
-        const statsData = rows[0];
-
-        // Atualiza o cache em memória
-        memoryCache.stats = { data: statsData, expiresAt: agora + CACHE_TTL_MS };
-
-        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-        res.json(statsData);
-    } catch (error) {
-        console.error("[-] Erro ao buscar estatísticas:", error.message);
-        res.status(500).json({ error: "Erro interno no servidor" });
-    }
-});
-
-// Rota 2: Analytics Avançado de CTI (Severidade e Top Tecnologias com Cache TTL)
-app.get('/api/threats/analytics', async (req, res) => {
-    try {
-        const agora = Date.now();
-        if (memoryCache.analytics.data && agora < memoryCache.analytics.expiresAt) {
-            res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-            return res.json(memoryCache.analytics.data);
-        }
-
-        const statsQuery = `
-            SELECT 
-                COUNT(*) as total_ameacas,
-                SUM(CASE WHEN nota_cvss >= 9.0 THEN 1 ELSE 0 END) as criticas,
-                SUM(CASE WHEN nota_cvss >= 7.0 AND nota_cvss < 9.0 THEN 1 ELSE 0 END) as altas,
-                SUM(CASE WHEN nota_cvss >= 4.0 AND nota_cvss < 7.0 THEN 1 ELSE 0 END) as medias,
-                SUM(CASE WHEN nota_cvss > 0.0 AND nota_cvss < 4.0 THEN 1 ELSE 0 END) as baixas,
-                MAX(nota_cvss) as pior_risco,
-                ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2) as media_score
-            FROM threats;
-        `;
-
-        const techQuery = `
-            SELECT 
-                SUM(CASE WHEN descricao ILIKE '%windows%' OR descricao ILIKE '%microsoft%' THEN 1 ELSE 0 END) as microsoft,
-                SUM(CASE WHEN descricao ILIKE '%linux%' OR descricao ILIKE '%kernel%' THEN 1 ELSE 0 END) as linux,
-                SUM(CASE WHEN descricao ILIKE '%android%' OR descricao ILIKE '%google%' THEN 1 ELSE 0 END) as google,
-                SUM(CASE WHEN descricao ILIKE '%apple%' OR descricao ILIKE '%macos%' OR descricao ILIKE '%ios%' THEN 1 ELSE 0 END) as apple,
-                SUM(CASE WHEN descricao ILIKE '%apache%' THEN 1 ELSE 0 END) as apache,
-                SUM(CASE WHEN descricao ILIKE '%cisco%' THEN 1 ELSE 0 END) as cisco,
-                SUM(CASE WHEN descricao ILIKE '%oracle%' THEN 1 ELSE 0 END) as oracle
-            FROM threats;
-        `;
-
-        const [statsResult, techResult] = await Promise.all([
-            pool.query(statsQuery),
-            pool.query(techQuery)
-        ]);
-
-        const rawTech = techResult.rows[0] || {};
-        const topTecnologias = [
-            { nome: 'Microsoft / Windows', total: parseInt(rawTech.microsoft || 0, 10), cor: '#00d4ff' },
-            { nome: 'Linux / Kernel', total: parseInt(rawTech.linux || 0, 10), cor: '#00ff88' },
-            { nome: 'Google / Android', total: parseInt(rawTech.google || 0, 10), cor: '#fbbf24' },
-            { nome: 'Apple / iOS / macOS', total: parseInt(rawTech.apple || 0, 10), cor: '#a855f7' },
-            { nome: 'Apache Foundation', total: parseInt(rawTech.apache || 0, 10), cor: '#f97316' },
-            { nome: 'Cisco Systems', total: parseInt(rawTech.cisco || 0, 10), cor: '#06b6d4' },
-            { nome: 'Oracle', total: parseInt(rawTech.oracle || 0, 10), cor: '#ef4444' }
-        ].sort((a, b) => b.total - a.total);
-
-        const responsePayload = {
-            stats: statsResult.rows[0],
-            topTecnologias
-        };
-
-        // Grava no cache em memória
-        memoryCache.analytics = { data: responsePayload, expiresAt: agora + CACHE_TTL_MS };
-
-        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-        res.json(responsePayload);
-    } catch (error) {
-        console.error("[-] Erro ao buscar analytics de inteligência:", error.message);
-        res.status(500).json({ error: "Erro interno no servidor" });
-    }
-});
+const TECH_PALETTE = {
+    'Microsoft / Windows': '#00d4ff',
+    'PHP Ecosystem': '#38bdf8',
+    'Linux / Kernel': '#00ff88',
+    'Oracle': '#ef4444',
+    'Cisco Systems': '#06b6d4',
+    'Apache Foundation': '#f97316',
+    'Apple': '#a855f7',
+    'Google / Android': '#fbbf24',
+    'OpenSSL / Crypto': '#ec4899',
+    'Fortinet / SonicWall': '#14b8a6',
+    'VMware': '#8b5cf6'
+};
 
 // Helper para Chains com Fallback Inteligente (garante que sempre haja inteligência visível)
 function gerarChainsPadrao() {
@@ -341,43 +250,250 @@ function gerarChainsPadrao() {
     ];
 }
 
+// -----------------------------------------------------------------------------
+// CAMADA DE ACESSO A DADOS COM CACHE EM MEMÓRIA
+// -----------------------------------------------------------------------------
+
+async function obterStats() {
+    const agora = Date.now();
+    if (memoryCache.stats.data && agora < memoryCache.stats.expiresAt) {
+        return memoryCache.stats.data;
+    }
+
+    const query = `
+        SELECT 
+            COUNT(*) as total_ameacas,
+            SUM(CASE WHEN nota_cvss >= 9.0 THEN 1 ELSE 0 END) as criticas,
+            SUM(CASE WHEN nota_cvss >= 7.0 AND nota_cvss < 9.0 THEN 1 ELSE 0 END) as altas,
+            SUM(CASE WHEN nota_cvss >= 4.0 AND nota_cvss < 7.0 THEN 1 ELSE 0 END) as medias,
+            SUM(CASE WHEN nota_cvss > 0.0 AND nota_cvss < 4.0 THEN 1 ELSE 0 END) as baixas,
+            MAX(nota_cvss) as pior_risco,
+            ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2) as media_score
+        FROM threats;
+    `;
+    const { rows } = await pool.query(query);
+    const statsData = rows[0] || {};
+    memoryCache.stats = { data: statsData, expiresAt: agora + CACHE_TTL_MS };
+    return statsData;
+}
+
+async function obterAnalytics() {
+    const agora = Date.now();
+    if (memoryCache.analytics.data && agora < memoryCache.analytics.expiresAt) {
+        return memoryCache.analytics.data;
+    }
+
+    // Consulta otimizada por índice sobre a coluna 'tecnologia'
+    const techQuery = `
+        SELECT tecnologia as nome, COUNT(*)::int as total
+        FROM threats
+        WHERE tecnologia IS NOT NULL AND tecnologia != 'Desconhecido / Geral'
+        GROUP BY tecnologia
+        ORDER BY total DESC
+        LIMIT 10;
+    `;
+
+    const [statsData, techResult] = await Promise.all([
+        obterStats(),
+        pool.query(techQuery)
+    ]);
+
+    const topTecnologias = (techResult.rows || []).map((row) => ({
+        nome: row.nome,
+        total: parseInt(row.total || 0, 10),
+        cor: TECH_PALETTE[row.nome] || '#94a3b8'
+    }));
+
+    const responsePayload = {
+        stats: statsData,
+        topTecnologias
+    };
+
+    memoryCache.analytics = { data: responsePayload, expiresAt: agora + CACHE_TTL_MS };
+    return responsePayload;
+}
+
+async function obterChains(limit = 50) {
+    const agora = Date.now();
+    if (memoryCache.chains.data && agora < memoryCache.chains.expiresAt) {
+        return memoryCache.chains.data;
+    }
+
+    let chainsRetornadas = [];
+    try {
+        const query = `
+            SELECT chain_id, tecnologia, severidade, score_cvss, cves, writeup, data_criacao
+            FROM exploit_chains
+            ORDER BY score_cvss DESC, data_criacao DESC
+            LIMIT $1;
+        `;
+        const { rows } = await pool.query(query, [limit]);
+        if (rows && rows.length > 0) {
+            chainsRetornadas = rows;
+        }
+    } catch (dbErr) {
+        console.warn("[!] [API Chains] Tabela exploit_chains ainda não populada no banco:", dbErr.message);
+    }
+
+    if (chainsRetornadas.length === 0) {
+        chainsRetornadas = gerarChainsPadrao();
+    }
+
+    memoryCache.chains = { data: chainsRetornadas, expiresAt: agora + CACHE_TTL_MS };
+    return chainsRetornadas;
+}
+
+async function obterClusters() {
+    const agora = Date.now();
+    if (memoryCache.clusters.data && agora < memoryCache.clusters.expiresAt) {
+        return memoryCache.clusters.data;
+    }
+
+    const clusterQuery = `
+        SELECT 
+            cluster_label, 
+            COUNT(*) as total,
+            ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2) as media_score
+        FROM threats
+        WHERE cluster_label IS NOT NULL AND cluster_label != 'Geral / Não Clusterizado'
+        GROUP BY cluster_label
+        ORDER BY total DESC;
+    `;
+
+    const primitiveQuery = `
+        SELECT 
+            primitiva,
+            COUNT(*) as total
+        FROM threats
+        WHERE primitiva IS NOT NULL AND primitiva != 'GENERIC_VULN'
+        GROUP BY primitiva
+        ORDER BY total DESC;
+    `;
+
+    const [clusterRes, primitiveRes] = await Promise.all([
+        pool.query(clusterQuery),
+        pool.query(primitiveQuery)
+    ]);
+
+    const payload = {
+        clusters: clusterRes.rows || [],
+        primitivas: primitiveRes.rows || []
+    };
+
+    memoryCache.clusters = { data: payload, expiresAt: agora + CACHE_TTL_MS };
+    return payload;
+}
+
+async function obterDefaultThreats(limit = 25) {
+    const agora = Date.now();
+    const entry = memoryCache.defaultThreats[limit];
+    if (entry && agora < entry.expiresAt) {
+        return entry.data;
+    }
+
+    const dataQuery = `
+        SELECT cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, data_extracao 
+        FROM threats 
+        ORDER BY nota_cvss DESC, data_extracao DESC 
+        LIMIT $1;
+    `;
+    const { rows } = await pool.query(dataQuery, [limit]);
+
+    let totalRegistros = 10000;
+    if (memoryCache.stats.data && memoryCache.stats.data.total_ameacas) {
+        totalRegistros = parseInt(memoryCache.stats.data.total_ameacas, 10);
+    } else {
+        const countRes = await pool.query('SELECT COUNT(*) as total FROM threats;');
+        totalRegistros = parseInt(countRes.rows[0].total, 10);
+    }
+
+    const payload = {
+        pagina: 1,
+        limite: limit,
+        total: totalRegistros,
+        totalPaginas: Math.ceil(totalRegistros / limit) || 1,
+        dados: rows
+    };
+
+    memoryCache.defaultThreats[limit] = { data: payload, expiresAt: agora + CACHE_TTL_MS };
+    return payload;
+}
+
+// -----------------------------------------------------------------------------
+// ROTAS DA API
+// -----------------------------------------------------------------------------
+
+// Rota de Healthcheck
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'OK', message: 'Cyber Threat API rodando com sucesso!' });
+});
+
+// Rota Consolidada de Alta Performance (Single Round-Trip Bootstrap)
+app.get('/api/threats/overview', async (req, res) => {
+    try {
+        const agora = Date.now();
+        if (memoryCache.overview.data && agora < memoryCache.overview.expiresAt) {
+            res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
+            return res.json(memoryCache.overview.data);
+        }
+
+        const [analytics, chains, clusters, initialThreats] = await Promise.all([
+            obterAnalytics(),
+            obterChains(50),
+            obterClusters(),
+            obterDefaultThreats(25)
+        ]);
+
+        const payload = {
+            status: 'OK',
+            stats: analytics.stats,
+            topTecnologias: analytics.topTecnologias,
+            chains,
+            clusters,
+            initialThreats
+        };
+
+        memoryCache.overview = { data: payload, expiresAt: agora + CACHE_TTL_MS };
+
+        res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
+        res.json(payload);
+    } catch (error) {
+        console.error("[-] Erro ao buscar overview consolidado:", error.message);
+        res.status(500).json({ error: "Erro interno no servidor" });
+    }
+});
+
+// Rota 1: Resumo Estatístico Consolidado (Com Cache TTL em RAM)
+app.get('/api/threats/stats', async (req, res) => {
+    try {
+        const statsData = await obterStats();
+        res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
+        res.json(statsData);
+    } catch (error) {
+        console.error("[-] Erro ao buscar estatísticas:", error.message);
+        res.status(500).json({ error: "Erro interno no servidor" });
+    }
+});
+
+// Rota 2: Analytics Avançado de CTI (Severidade e Top Tecnologias com Cache TTL)
+app.get('/api/threats/analytics', async (req, res) => {
+    try {
+        const payload = await obterAnalytics();
+        res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
+        res.json(payload);
+    } catch (error) {
+        console.error("[-] Erro ao buscar analytics de inteligência:", error.message);
+        res.status(500).json({ error: "Erro interno no servidor" });
+    }
+});
+
 // Rota 3: Exploit Chains e Blueprints de Ataque Gerados por IA/Grafos
 app.get('/api/threats/chains', async (req, res) => {
     try {
-        const agora = Date.now();
-        if (memoryCache.chains.data && agora < memoryCache.chains.expiresAt) {
-            res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-            return res.json(memoryCache.chains.data);
-        }
-
         const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 50, 100));
-        let chainsRetornadas = [];
-
-        try {
-            const query = `
-                SELECT chain_id, tecnologia, severidade, score_cvss, cves, writeup, data_criacao
-                FROM exploit_chains
-                ORDER BY score_cvss DESC, data_criacao DESC
-                LIMIT $1;
-            `;
-            const { rows } = await pool.query(query, [limit]);
-            if (rows && rows.length > 0) {
-                chainsRetornadas = rows;
-            }
-        } catch (dbErr) {
-            console.warn("[!] [API Chains] Tabela exploit_chains ainda não populada no banco:", dbErr.message);
-        }
-
-        // Se o banco ainda não tiver a tabela exploit_chains populada pelo upload_aws.py,
-        // retorna as chains canônicas pré-computadas para garantir inteligência imediata no dashboard
-        if (chainsRetornadas.length === 0) {
-            chainsRetornadas = gerarChainsPadrao();
-        }
-
-        memoryCache.chains = { data: chainsRetornadas, expiresAt: agora + CACHE_TTL_MS };
-
-        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-        res.json(chainsRetornadas);
+        const chains = await obterChains(limit);
+        res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
+        res.json(chains);
     } catch (error) {
         console.error("[-] Erro ao buscar exploit chains:", error.message);
         res.json(gerarChainsPadrao());
@@ -387,46 +503,8 @@ app.get('/api/threats/chains', async (req, res) => {
 // Rota 4: Estatísticas de Clusters e Primitivas
 app.get('/api/threats/clusters', async (req, res) => {
     try {
-        const agora = Date.now();
-        if (memoryCache.clusters.data && agora < memoryCache.clusters.expiresAt) {
-            res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-            return res.json(memoryCache.clusters.data);
-        }
-
-        const clusterQuery = `
-            SELECT 
-                cluster_label, 
-                COUNT(*) as total,
-                ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2) as media_score
-            FROM threats
-            WHERE cluster_label IS NOT NULL AND cluster_label != 'Geral / Não Clusterizado'
-            GROUP BY cluster_label
-            ORDER BY total DESC;
-        `;
-
-        const primitiveQuery = `
-            SELECT 
-                primitiva,
-                COUNT(*) as total
-            FROM threats
-            WHERE primitiva IS NOT NULL AND primitiva != 'GENERIC_VULN'
-            GROUP BY primitiva
-            ORDER BY total DESC;
-        `;
-
-        const [clusterRes, primitiveRes] = await Promise.all([
-            pool.query(clusterQuery),
-            pool.query(primitiveQuery)
-        ]);
-
-        const payload = {
-            clusters: clusterRes.rows,
-            primitivas: primitiveRes.rows
-        };
-
-        memoryCache.clusters = { data: payload, expiresAt: agora + CACHE_TTL_MS };
-
-        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+        const payload = await obterClusters();
+        res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
         res.json(payload);
     } catch (error) {
         console.error("[-] Erro ao buscar clusters:", error.message);
@@ -446,7 +524,7 @@ app.get('/api/threats/critical', async (req, res) => {
             LIMIT $1;
         `;
         const { rows } = await pool.query(query, [limit]);
-        res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
         res.json(rows);
     } catch (error) {
         console.error("[-] Erro ao buscar ameaças críticas:", error.message);
@@ -470,7 +548,6 @@ app.get('/api/threats', async (req, res) => {
     try {
         const page = Math.max(1, Math.min(parseInt(req.query.page, 10) || 1, 100000));
         const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 50, 1000));
-        const offset = (page - 1) * limit;
 
         // Sanitização de busca: limite de 100 caracteres e remoção de caracteres nulos
         const rawSearch = req.query.search 
@@ -488,13 +565,20 @@ app.get('/api/threats', async (req, res) => {
             : null;
         const primitive = inputPrimitive && PRIMITIVAS_VALIDAS.has(inputPrimitive) ? inputPrimitive : null;
 
+        // Otimização de Performance: Se for a página inicial padrão sem filtros, serve direto do cache em RAM
+        if (page === 1 && !rawSearch && !severity && !primitive && (limit === 25 || limit === 10 || limit === 50)) {
+            const cachedResult = await obterDefaultThreats(limit);
+            res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+            return res.json(cachedResult);
+        }
+
+        const offset = (page - 1) * limit;
         let whereClauses = [];
         let queryParams = [];
 
         if (rawSearch) {
             queryParams.push(rawSearch);
             const p = queryParams.length;
-            // Busca Híbrida: Full-Text Search no GIN Index + ILIKE para substrings parciais de CVE IDs e tecnologias
             whereClauses.push(`(
                 cve_id ILIKE '%' || $${p} || '%'
                 OR to_tsvector('english', coalesce(descricao, '')) @@ plainto_tsquery('english', $${p})
@@ -516,10 +600,15 @@ app.get('/api/threats', async (req, res) => {
 
         const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-        // Contagem total para paginação
-        const countQuery = `SELECT COUNT(*) as total FROM threats ${whereSql};`;
-        const countResult = await pool.query(countQuery, queryParams);
-        const totalRegistros = parseInt(countResult.rows[0].total, 10);
+        // Contagem total otimizada: reutiliza o total de ameaças em cache caso não haja filtros
+        let totalRegistros = 0;
+        if (whereClauses.length === 0 && memoryCache.stats.data && memoryCache.stats.data.total_ameacas) {
+            totalRegistros = parseInt(memoryCache.stats.data.total_ameacas, 10);
+        } else {
+            const countQuery = `SELECT COUNT(*) as total FROM threats ${whereSql};`;
+            const countResult = await pool.query(countQuery, queryParams);
+            totalRegistros = parseInt(countResult.rows[0].total, 10);
+        }
 
         // Busca paginada com ordenação otimizada por índice
         queryParams.push(limit);
@@ -536,7 +625,7 @@ app.get('/api/threats', async (req, res) => {
         `;
         const { rows } = await pool.query(dataQuery, queryParams);
 
-        res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=45');
+        res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=120');
         res.json({
             pagina: page,
             limite: limit,
@@ -561,6 +650,38 @@ app.use((err, req, res, next) => {
     res.status(err.status || 500).json({ error: "Erro interno no servidor" });
 });
 
+// Pré-aquecimento do Cache em Memória no Boot do Servidor
+async function preAquecerCache() {
+    try {
+        console.log('[+] [Cache Engine] Pré-aquecendo cache em RAM no boot do servidor...');
+        const t0 = Date.now();
+        await Promise.all([
+            obterAnalytics(),
+            obterChains(50),
+            obterClusters(),
+            obterDefaultThreats(25),
+            obterDefaultThreats(10)
+        ]);
+
+        const analytics = memoryCache.analytics.data;
+        memoryCache.overview = {
+            data: {
+                status: 'OK',
+                stats: analytics ? analytics.stats : null,
+                topTecnologias: analytics ? analytics.topTecnologias : [],
+                chains: memoryCache.chains.data,
+                clusters: memoryCache.clusters.data,
+                initialThreats: memoryCache.defaultThreats[25] ? memoryCache.defaultThreats[25].data : null
+            },
+            expiresAt: Date.now() + CACHE_TTL_MS
+        };
+        console.log(`[+] [Cache Engine] Cache em RAM 100% aquecido em ${Date.now() - t0}ms (respostas subsequentes em < 2ms)!`);
+    } catch (err) {
+        console.warn('[-] [Cache Engine] Aviso no pré-aquecimento:', err.message);
+    }
+}
+
 app.listen(port, () => {
     console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Compression + RAM Cache + GIN FTS + ML Chains Ativos]`);
+    preAquecerCache();
 });
