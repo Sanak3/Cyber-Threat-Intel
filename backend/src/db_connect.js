@@ -3,9 +3,11 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 // Configuração do pool de conexão com suporte a SSL seguro
-const sslConfig = process.env.DB_SSL_CA
-    ? { ca: process.env.DB_SSL_CA, rejectUnauthorized: true }
-    : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' };
+const sslConfig = process.env.DB_SSL === 'false'
+    ? false
+    : (process.env.DB_SSL_CA
+        ? { ca: process.env.DB_SSL_CA, rejectUnauthorized: true }
+        : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' });
 
 const pool = new Pool({
     host: process.env.DB_HOST,
