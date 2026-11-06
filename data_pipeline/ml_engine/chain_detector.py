@@ -1,7 +1,52 @@
 from typing import List, Dict, Any
+import math
 import pandas as pd
 import networkx as nx
 from .primitives import AttackPrimitive
+
+
+def _str_segura(val: Any, default: str = "") -> str:
+    """Normaliza valores opcionais evitando que NaN do Pandas vire a string literal 'nan'."""
+    if val is None:
+        return default
+    if isinstance(val, float) and math.isnan(val):
+        return default
+    try:
+        if pd.isna(val):
+            return default
+    except (TypeError, ValueError):
+        pass
+    texto = str(val).strip()
+    if texto.lower() in {"", "nan", "none", "null", "*", "-", "n/a"}:
+        return default
+    return texto
+
+
+def _bool_seguro(val: Any) -> bool:
+    """Normaliza booleanos tratando NaN/None do Pandas como False."""
+    if val is None:
+        return False
+    if isinstance(val, float) and math.isnan(val):
+        return False
+    try:
+        if pd.isna(val):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, str):
+        return val.strip().lower() in {"true", "1", "yes"}
+    return bool(val)
+
+
+def _float_seguro(val: Any, default: float = 0.0) -> float:
+    """Converte valores numéricos tratando NaN/None como default."""
+    if val is None:
+        return default
+    try:
+        num = float(val)
+        return default if math.isnan(num) else num
+    except (TypeError, ValueError):
+        return default
 
 
 class ExploitChainDetector:
@@ -53,8 +98,8 @@ class ExploitChainDetector:
           (ex.: Exchange/IIS RCE -> Windows Kernel PRIV_ESC, Safari -> macOS, Chrome -> Android),
           bloqueando falsos positivos entre softwares distintos (ex.: Jenkins -> Kubernetes, Kafka -> Tomcat).
         """
-        prod_origem = (cve_origem.get("subproduto") or cve_origem.get("cpe_product") or "").strip().lower()
-        prod_destino = (cve_destino.get("subproduto") or cve_destino.get("cpe_product") or "").strip().lower()
+        prod_origem = (_str_segura(cve_origem.get("subproduto")) or _str_segura(cve_origem.get("cpe_product"))).lower()
+        prod_destino = (_str_segura(cve_destino.get("subproduto")) or _str_segura(cve_destino.get("cpe_product"))).lower()
 
         if not prod_origem or not prod_destino:
             return True
@@ -74,7 +119,7 @@ class ExploitChainDetector:
         combina maior nota (65%), média dos elos (35%), sinergia do encadeamento
         e bonificação tática para vulnerabilidades confirmadas no catálogo CISA KEV.
         """
-        notas = [float(c.get("nota_cvss", 0.0)) for c in cve_detalhes if float(c.get("nota_cvss", 0.0)) > 0]
+        notas = [_float_seguro(c.get("nota_cvss")) for c in cve_detalhes if _float_seguro(c.get("nota_cvss")) > 0]
         if not notas:
             base = 7.0
         else:
@@ -99,28 +144,31 @@ class ExploitChainDetector:
 
         # 1. Adicionar nós com metadados estruturados (incluindo CISA KEV, CWE e subproduto)
         for _, row in df_vulnerabilidades.iterrows():
-            cve_id = row.get("id_cve")
+            cve_id = _str_segura(row.get("id_cve"))
             if not cve_id:
                 continue
 
-            cpe_prod = str(row.get("cpe_product") or "").strip().lower()
-            subprod = str(row.get("subproduto") or cpe_prod).strip().lower()
+            cpe_prod = _str_segura(row.get("cpe_product")).lower()
+            subprod = (_str_segura(row.get("subproduto")) or cpe_prod).lower()
+            data_pub = row.get("data_publicacao")
+            if data_pub is not None and pd.isna(data_pub):
+                data_pub = None
 
             self.graph.add_node(
                 cve_id,
                 cve_id=cve_id,
-                descricao=row.get("descricao", ""),
-                nota_cvss=float(row.get("nota_cvss", 0.0)),
-                severidade=row.get("severidade", "UNKNOWN"),
-                primitiva=row.get("primitiva", AttackPrimitive.GENERIC_VULN),
-                estagio=int(row.get("estagio_kill_chain", 0)),
-                tecnologia=row.get("tecnologia", "Desconhecido / Geral"),
+                descricao=_str_segura(row.get("descricao")),
+                nota_cvss=_float_seguro(row.get("nota_cvss")),
+                severidade=_str_segura(row.get("severidade"), "UNKNOWN"),
+                primitiva=_str_segura(row.get("primitiva"), AttackPrimitive.GENERIC_VULN),
+                estagio=int(_float_seguro(row.get("estagio_kill_chain"), 0)),
+                tecnologia=_str_segura(row.get("tecnologia"), "Desconhecido / Geral"),
                 cpe_product=cpe_prod,
-                cpe_vendor=str(row.get("cpe_vendor") or "").strip().lower(),
+                cpe_vendor=_str_segura(row.get("cpe_vendor")).lower(),
                 subproduto=subprod,
-                cwe=row.get("cwe") or "NVD-CWE-noinfo",
-                cisa_kev=bool(row.get("cisa_kev", False)),
-                data_publicacao=row.get("data_publicacao"),
+                cwe=_str_segura(row.get("cwe"), "NVD-CWE-noinfo"),
+                cisa_kev=_bool_seguro(row.get("cisa_kev")),
+                data_publicacao=data_pub,
             )
 
         # 2. Agrupar por tecnologia para criar as arestas de transição
@@ -134,7 +182,7 @@ class ExploitChainDetector:
             cves = group.to_dict("records")
             # Prioriza CVEs exploradas ativamente (CISA KEV) e de maior severidade CVSS
             cves.sort(
-                key=lambda x: (bool(x.get("cisa_kev", False)), float(x.get("nota_cvss", 0.0))),
+                key=lambda x: (_bool_seguro(x.get("cisa_kev")), _float_seguro(x.get("nota_cvss"))),
                 reverse=True
             )
 

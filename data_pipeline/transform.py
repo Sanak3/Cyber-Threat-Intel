@@ -1,6 +1,15 @@
 import numpy as np
 
 
+def _normalizar_valor_registro(val):
+    """Converte NaN/NaT/NA residuais do Pandas em None para compatibilidade com JSON e NULL no PostgreSQL."""
+    if val is None or isinstance(val, (bool, int, str, list, dict)):
+        return val
+    if isinstance(val, float) and np.isnan(val):
+        return None
+    return val
+
+
 def normalizar_severidade_cvss(score_float, severity_raw=None):
     """
     Normaliza o rótulo de severidade pela escala canônica CVSS v3/v4,
@@ -278,7 +287,10 @@ def transformar_dados(dados_brutos):
         writeups = WriteupBuilder.construir_relatorio_completo(chains)
         print(f"[+] [ML Engine] Concluído: {len(writeups)} Writeup Blueprints de cadeias de ataque gerados com sucesso.\n")
 
-        vulnerabilidades_enriquecidas = df.to_dict("records")
+        vulnerabilidades_enriquecidas = [
+            {k: _normalizar_valor_registro(v) for k, v in reg.items()}
+            for reg in df.to_dict("records")
+        ]
         return vulnerabilidades_enriquecidas, writeups
 
     except Exception as e_ml:

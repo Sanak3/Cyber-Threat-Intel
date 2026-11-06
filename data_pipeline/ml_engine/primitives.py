@@ -1,3 +1,4 @@
+import math
 import re
 from typing import Dict, Any, List
 import pandas as pd
@@ -202,28 +203,48 @@ CPE_VENDOR_MAP = {
 }
 
 
+def _limpar_str_opcional(val: Any) -> str:
+    """Converte valores opcionais (incluindo None e NaN do Pandas) em string limpa segura."""
+    if val is None:
+        return ""
+    if isinstance(val, float) and math.isnan(val):
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    texto = str(val).strip()
+    if texto.lower() in {"", "nan", "none", "null", "*", "-", "n/a"}:
+        return ""
+    return texto
+
+
 def extrair_primitiva(descricao: str, cwe: str = None) -> Dict[str, Any]:
     """
     Analisa CWE estruturado e descrição técnica da vulnerabilidade,
     inferindo a primitiva de ataque e seu estágio na Cyber Kill Chain.
     """
+    cwe_clean = _limpar_str_opcional(cwe).upper()
+
     # 1. Prioridade para CWE estruturado do NIST (precisão determinística)
-    if cwe and cwe in CWE_PRIMITIVE_MAP:
-        prim = CWE_PRIMITIVE_MAP[cwe]
+    if cwe_clean and cwe_clean in CWE_PRIMITIVE_MAP:
+        prim = CWE_PRIMITIVE_MAP[cwe_clean]
         return {
             "primitiva": prim,
             "estagio": KILL_CHAIN_STAGES[prim],
-            "termo_encontrado": cwe
+            "termo_encontrado": cwe_clean
         }
 
-    if not descricao or not isinstance(descricao, str):
+    desc_clean = _limpar_str_opcional(descricao)
+    if not desc_clean:
         return {
             "primitiva": AttackPrimitive.GENERIC_VULN,
             "estagio": 0,
             "termo_encontrado": None
         }
 
-    texto_lower = descricao.lower()
+    texto_lower = desc_clean.lower()
 
     # 2. Heurística Regex por ordem de impacto tático
     ordem_checagem = [
@@ -257,15 +278,15 @@ def extrair_subproduto(descricao: str, cpe_product: str = None) -> str:
     Extrai o identificador normalizado do subproduto afetado via CPE 2.3
     ou heurística textual quando o CPE ainda não foi catalogado pelo NIST.
     """
-    if cpe_product:
-        prod_clean = str(cpe_product).lower().strip()
-        if prod_clean and prod_clean not in {"*", "-", "n/a"}:
-            return prod_clean
+    prod_clean = _limpar_str_opcional(cpe_product).lower()
+    if prod_clean:
+        return prod_clean
 
-    if not descricao or not isinstance(descricao, str):
+    desc_clean = _limpar_str_opcional(descricao)
+    if not desc_clean:
         return ""
 
-    texto_lower = descricao.lower()
+    texto_lower = desc_clean.lower()
     for subprod_id, pattern in SUBPRODUCT_PATTERNS.items():
         if re.search(pattern, texto_lower):
             return subprod_id
@@ -278,14 +299,15 @@ def extrair_tecnologia(descricao: str, cpe_vendor: str = None, cpe_product: str 
     Identifica o ecossistema ou fabricante afetado a partir do CPE estruturado
     ou heurística de descrição técnica.
     """
-    vendor_clean = str(cpe_vendor).lower().strip() if cpe_vendor else ""
+    vendor_clean = _limpar_str_opcional(cpe_vendor).lower()
+    desc_clean = _limpar_str_opcional(descricao)
 
     # 1. Resolução via CPE estruturado (Configurations do NIST)
     if vendor_clean in CPE_VENDOR_MAP:
         return CPE_VENDOR_MAP[vendor_clean]
 
-    if descricao and isinstance(descricao, str):
-        texto_lower = descricao.lower()
+    if desc_clean:
+        texto_lower = desc_clean.lower()
 
         # 2. Regex nos padrões de ecossistemas conhecidos
         for tech_nome, patterns in TECH_PATTERNS.items():
@@ -294,17 +316,17 @@ def extrair_tecnologia(descricao: str, cpe_vendor: str = None, cpe_product: str 
                     return tech_nome
 
     # 3. Aproveita o fabricante estruturado do CPE para alvos corporativos fora do mapa fixo (ex.: Zyxel, Sophos, Veeam)
-    if vendor_clean and len(vendor_clean) > 2 and vendor_clean not in {"*", "-", "n/a", "unknown"}:
+    if vendor_clean and len(vendor_clean) > 2 and vendor_clean != "unknown":
         return vendor_clean.replace("_", " ").title()
 
-    if not descricao or not isinstance(descricao, str):
+    if not desc_clean:
         return "Desconhecido / Geral"
 
     # 4. Fallback: Tenta identificar "in <Component> before <Version>"
-    match_component = re.search(r"\bin\s+([A-Za-z0-9_\-\.]+)\s+(?:before|through|version|prior)", descricao, re.IGNORECASE)
+    match_component = re.search(r"\bin\s+([A-Za-z0-9_\-\.]+)\s+(?:before|through|version|prior)", desc_clean, re.IGNORECASE)
     if match_component:
         candidato = match_component.group(1).strip()
-        if len(candidato) > 2 and candidato.lower() not in ["the", "all", "any", "some"]:
+        if len(candidato) > 2 and candidato.lower() not in ["the", "all", "any", "some", "nan", "none"]:
             return candidato
 
     return "Desconhecido / Geral"
@@ -327,10 +349,10 @@ def enriquecer_vulnerabilidades(vulnerabilidades: List[Dict[str, Any]]) -> pd.Da
     subprodutos = []
 
     for _, row in df.iterrows():
-        desc = row.get("descricao", "")
-        cwe = row.get("cwe")
-        cpe_vendor = row.get("cpe_vendor")
-        cpe_product = row.get("cpe_product")
+        desc = _limpar_str_opcional(row.get("descricao"))
+        cwe = _limpar_str_opcional(row.get("cwe")) or None
+        cpe_vendor = _limpar_str_opcional(row.get("cpe_vendor")) or None
+        cpe_product = _limpar_str_opcional(row.get("cpe_product")) or None
 
         info_primitiva = extrair_primitiva(desc, cwe=cwe)
         tech = extrair_tecnologia(desc, cpe_vendor=cpe_vendor, cpe_product=cpe_product)

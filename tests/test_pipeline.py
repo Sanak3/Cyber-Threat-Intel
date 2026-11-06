@@ -300,6 +300,9 @@ class TestThreatPipeline(unittest.TestCase):
         self.assertEqual(extrair_subproduto(vulns[1]["descricao"]), "kubernetes")
 
         df = enriquecer_vulnerabilidades(vulns)
+        self.assertEqual(df.loc[0, "subproduto"], "jenkins")
+        self.assertEqual(df.loc[1, "subproduto"], "kubernetes")
+
         detector = ExploitChainDetector()
         detector.construir_grafo(df)
         chains = detector.detectar_chains(max_chains=10)

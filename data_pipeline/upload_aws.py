@@ -80,21 +80,24 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
         print(f"[!] [ETL Load] Deduplicação em memória: {total_duplicados:,} CVEs repetidos descartados ({len(vulnerabilidades_unicas):,} únicos para gravação).")
 
     # 4. Preparação das tuplas para inserção em lote (com colunas de ML, datas oficiais NIST e KEV)
+    def _limpar_nan(val):
+        return None if isinstance(val, float) and val != val else val
+
     registros_tuplas = [
         (
             item["id_cve"],
             item["descricao"],
-            float(item["nota_cvss"]),
+            float(item["nota_cvss"] or 0.0),
             item["severidade"],
-            item.get("primitiva", "GENERIC_VULN"),
-            item.get("tecnologia", "Desconhecido / Geral"),
-            item.get("cluster_label", "Geral / Não Clusterizado"),
-            item.get("data_publicacao"),
-            item.get("data_modificacao"),
-            item.get("cwe", "NVD-CWE-noinfo"),
-            item.get("cpe_vendor"),
-            item.get("cpe_product"),
-            bool(item.get("cisa_kev", False))
+            _limpar_nan(item.get("primitiva")) or "GENERIC_VULN",
+            _limpar_nan(item.get("tecnologia")) or "Desconhecido / Geral",
+            _limpar_nan(item.get("cluster_label")) or "Geral / Não Clusterizado",
+            _limpar_nan(item.get("data_publicacao")),
+            _limpar_nan(item.get("data_modificacao")),
+            _limpar_nan(item.get("cwe")) or "NVD-CWE-noinfo",
+            _limpar_nan(item.get("cpe_vendor")),
+            _limpar_nan(item.get("cpe_product")),
+            bool(_limpar_nan(item.get("cisa_kev")) or False)
         )
         for item in vulnerabilidades_unicas
     ]
