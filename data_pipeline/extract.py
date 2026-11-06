@@ -72,7 +72,7 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_re
             descoberta_ok = False
             for tentativa_disc in range(1, 4):
                 try:
-                    discovery_res = session.get(f"{base_url}?resultsPerPage=1", timeout=30)
+                    discovery_res = session.get(f"{base_url}?noRejected&resultsPerPage=1", timeout=30)
                     if discovery_res.status_code == 429:
                         print(f"[-] [RATE LIMIT 429] Aguardando 30s na descoberta de offset (Tentativa {tentativa_disc}/3)...")
                         time.sleep(30)
@@ -109,7 +109,7 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_re
             registros_restantes = total_desejado - len(todas_vulnerabilidades)
             results_per_page = min(max_por_pagina, registros_restantes)
 
-            url = f"{base_url}?resultsPerPage={results_per_page}&startIndex={start_index}{date_params}"
+            url = f"{base_url}?noRejected&resultsPerPage={results_per_page}&startIndex={start_index}{date_params}"
             print(f"\n[*] [ETL Extract] Baixando lote {lote_atual}/{total_lotes} (startIndex={start_index:,} | solicitando {results_per_page} registros)...")
 
             sucesso_lote = False

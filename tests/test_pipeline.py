@@ -6,7 +6,7 @@ import pandas as pd
 # Adiciona o diretório data_pipeline ao path para importação direta
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data_pipeline")))
 
-from transform import extrair_metricas_cvss, sanitizar_texto
+from transform import extrair_metricas_cvss, sanitizar_texto, transformar_dados
 from ml_engine.primitives import (
     AttackPrimitive,
     extrair_primitiva,
@@ -93,6 +93,40 @@ class TestThreatPipeline(unittest.TestCase):
     def test_sanitizar_texto(self):
         self.assertEqual(sanitizar_texto("Texto\x00 com byte nulo"), "Texto com byte nulo")
         self.assertEqual(sanitizar_texto(None), "Sem descrição disponível.")
+
+    def test_transformar_dados_descarta_rejected(self):
+        payload = {
+            "vulnerabilities": [
+                {
+                    "cve": {
+                        "id": "CVE-2026-0001",
+                        "vulnStatus": "Rejected",
+                        "descriptions": [{"lang": "en", "value": "** REJECT ** DO NOT USE THIS CANDIDATE NUMBER."}],
+                        "metrics": {}
+                    }
+                },
+                {
+                    "cve": {
+                        "id": "CVE-2026-0002",
+                        "vulnStatus": "Analyzed",
+                        "published": "2026-05-01T10:00:00.000",
+                        "lastModified": "2026-05-02T12:00:00.000",
+                        "descriptions": [{"lang": "en", "value": "SQL injection in Apache Tomcat"}],
+                        "metrics": {
+                            "cvssMetricV31": [{"type": "Primary", "cvssData": {"baseScore": 9.8, "baseSeverity": "CRITICAL"}}]
+                        },
+                        "weaknesses": [{"description": [{"lang": "en", "value": "CWE-89"}]}],
+                        "cisaExploitAdd": "2026-05-02"
+                    }
+                }
+            ]
+        }
+        res = transformar_dados(payload)
+        vulnerabilidades = res[0] if isinstance(res, tuple) else res
+        self.assertEqual(len(vulnerabilidades), 1)
+        self.assertEqual(vulnerabilidades[0]["id_cve"], "CVE-2026-0002")
+        self.assertTrue(vulnerabilidades[0]["cisa_kev"])
+        self.assertEqual(vulnerabilidades[0]["cwe"], "CWE-89")
 
     def test_extrair_primitiva_com_cwe(self):
         # CWE-89 -> SQL Injection (INJECTION_RCE)

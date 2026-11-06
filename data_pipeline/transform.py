@@ -110,10 +110,17 @@ def transformar_dados(dados_brutos):
 
     vulnerabilidades_limpas = []
     notas_cvss = []
+    rejeitadas_ignoradas = 0
 
     for item in vulnerabilidades_input:
         cve = item.get("cve", {})
         id_cve = cve.get("id", "UNKNOWN").strip()
+
+        # Defesa em profundidade: descarta CVEs com status Rejected
+        vuln_status = str(cve.get("vulnStatus") or "").strip().upper()
+        if vuln_status == "REJECTED":
+            rejeitadas_ignoradas += 1
+            continue
 
         # Extração de descrição em inglês ('en')
         descricoes = cve.get("descriptions", [])
@@ -122,6 +129,10 @@ def transformar_dados(dados_brutos):
             next((d.get("value") for d in descricoes if isinstance(d, dict)), "Sem descrição disponível.")
         )
         descricao = sanitizar_texto(descricao_raw)
+
+        if descricao.startswith("** REJECT **") or descricao.startswith("Rejected reason:"):
+            rejeitadas_ignoradas += 1
+            continue
 
         # Extração de métricas de severidade com fallback em cascata
         metrics = cve.get("metrics", {})
@@ -182,19 +193,27 @@ def transformar_dados(dados_brutos):
         if nota > 0.0:
             notas_cvss.append(nota)
 
+    total_validos = len(vulnerabilidades_limpas)
+    if rejeitadas_ignoradas > 0:
+        print(f"[*] [ETL Transform] {rejeitadas_ignoradas:,} CVEs revogadas/rejeitadas descartadas.")
+
+    if total_validos == 0:
+        print("[-] [ETL Transform] Nenhum registro válido restante após filtragem.")
+        return []
+
     # --------------------------------------------------------------------------
     # ANÁLISE VETORIAL E ESTATÍSTICA DE RISCO (NUMPY ENGINE)
     # --------------------------------------------------------------------------
     array_notas = np.array(notas_cvss, dtype=np.float64)
     total_com_nota = len(array_notas)
-    aguardando_analise = total_extraido - total_com_nota
+    aguardando_analise = total_validos - total_com_nota
 
     print("\n" + "=" * 65)
     print("        INTELIGÊNCIA DE AMEAÇAS // MATRIZ DE RISCO (NumPy)       ")
     print("=" * 65)
-    print(f"[*] Total de CVEs Processados:       {total_extraido:,}")
-    print(f"[*] CVEs Avaliados com CVSS Score:   {total_com_nota:,} ({(total_com_nota / total_extraido * 100):.1f}%)")
-    print(f"[*] CVEs Pendentes de Análise NIST:  {aguardando_analise:,} ({(aguardando_analise / total_extraido * 100):.1f}%)")
+    print(f"[*] Total de CVEs Válidos:           {total_validos:,}")
+    print(f"[*] CVEs Avaliados com CVSS Score:   {total_com_nota:,} ({(total_com_nota / total_validos * 100):.1f}%)")
+    print(f"[*] CVEs Pendentes de Análise NIST:  {aguardando_analise:,} ({(aguardando_analise / total_validos * 100):.1f}%)")
     print("-" * 65)
 
     if total_com_nota > 0:
