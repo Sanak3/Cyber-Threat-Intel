@@ -80,6 +80,136 @@ function limparCache() {
     memoryCache.defaultThreats = {};
 }
 
+// -----------------------------------------------------------------------------
+// GUARDA ZERO-DOWNTIME DE SCHEMA POSTGRESQL (Compatibilidade EPSS)
+// -----------------------------------------------------------------------------
+let schemaSuportaEpss = true;
+let promessaSchema = null;
+
+function resetarEstadoSchema(suporta = true) {
+    schemaSuportaEpss = Boolean(suporta);
+    promessaSchema = Promise.resolve(schemaSuportaEpss);
+}
+
+async function garantirSchemaRecente() {
+    if (promessaSchema) return promessaSchema;
+    promessaSchema = (async () => {
+        try {
+            await pool.query(`
+                ALTER TABLE threats ADD COLUMN IF NOT EXISTS epss_score FLOAT DEFAULT 0.0;
+                ALTER TABLE threats ADD COLUMN IF NOT EXISTS epss_percentile FLOAT DEFAULT 0.0;
+            `);
+            schemaSuportaEpss = true;
+        } catch (alterErr) {
+            try {
+                const checkRes = await pool.query(`
+                    SELECT COUNT(*)::int AS cols
+                    FROM information_schema.columns
+                    WHERE table_name = 'threats' AND column_name IN ('epss_score', 'epss_percentile');
+                `);
+                schemaSuportaEpss = ((checkRes.rows && checkRes.rows[0] && checkRes.rows[0].cols) || 0) >= 2;
+            } catch {
+                schemaSuportaEpss = false;
+            }
+            console.warn('[!] [Schema Guard] Aviso ao verificar colunas EPSS:', alterErr.message);
+        }
+        return schemaSuportaEpss;
+    })();
+    return promessaSchema;
+}
+
+function colunasEpssSelect() {
+    return schemaSuportaEpss
+        ? 'COALESCE(epss_score, 0) AS epss_score, COALESCE(epss_percentile, 0) AS epss_percentile'
+        : '0.0::float AS epss_score, 0.0::float AS epss_percentile';
+}
+
+const MITRE_POR_PRIMITIVA = {
+    RECON_INFO_LEAK: {
+        tactic_id: 'TA0001',
+        tactic: 'Initial Access',
+        technique_id: 'T1190',
+        technique: 'Exploit Public-Facing Application'
+    },
+    AUTH_BYPASS: {
+        tactic_id: 'TA0006',
+        tactic: 'Credential Access',
+        technique_id: 'T1078',
+        technique: 'Valid Accounts / Auth Bypass'
+    },
+    INJECTION_RCE: {
+        tactic_id: 'TA0002',
+        tactic: 'Execution',
+        technique_id: 'T1059',
+        technique: 'Command and Scripting Interpreter'
+    },
+    PRIV_ESC: {
+        tactic_id: 'TA0004',
+        tactic: 'Privilege Escalation',
+        technique_id: 'T1068',
+        technique: 'Exploitation for Privilege Escalation'
+    },
+    DENIAL_OF_SERVICE: {
+        tactic_id: 'TA0040',
+        tactic: 'Impact',
+        technique_id: 'T1499',
+        technique: 'Endpoint Denial of Service'
+    },
+    GENERIC_VULN: {
+        tactic_id: 'TA0001',
+        tactic: 'Initial Access',
+        technique_id: 'T1190',
+        technique: 'Exploit Public-Facing Application'
+    }
+};
+
+const MITRE_POR_CWE = {
+    'CWE-22': { tactic_id: 'TA0009', tactic: 'Collection', technique_id: 'T1005', technique: 'Data from Local System' },
+    'CWE-200': { tactic_id: 'TA0009', tactic: 'Collection', technique_id: 'T1005', technique: 'Data from Local System' },
+    'CWE-532': { tactic_id: 'TA0006', tactic: 'Credential Access', technique_id: 'T1552', technique: 'Unsecured Credentials' },
+    'CWE-798': { tactic_id: 'TA0006', tactic: 'Credential Access', technique_id: 'T1552', technique: 'Unsecured Credentials' },
+    'CWE-89': { tactic_id: 'TA0001', tactic: 'Initial Access', technique_id: 'T1190', technique: 'Exploit Public-Facing Application' },
+    'CWE-918': { tactic_id: 'TA0001', tactic: 'Initial Access', technique_id: 'T1190', technique: 'Exploit Public-Facing Application' },
+    'CWE-502': { tactic_id: 'TA0002', tactic: 'Execution', technique_id: 'T1203', technique: 'Exploitation for Client/Server Execution' },
+    'CWE-79': { tactic_id: 'TA0002', tactic: 'Execution', technique_id: 'T1059.007', technique: 'JavaScript Execution' }
+};
+
+function resolverMitrePasso(primitiva, cwe) {
+    const cweKey = typeof cwe === 'string' ? cwe.trim().toUpperCase() : '';
+    if (MITRE_POR_CWE[cweKey]) return { ...MITRE_POR_CWE[cweKey] };
+    return { ...(MITRE_POR_PRIMITIVA[primitiva] || MITRE_POR_PRIMITIVA.GENERIC_VULN) };
+}
+
+function normalizarChainRow(chainRow) {
+    if (!chainRow || typeof chainRow !== 'object') return chainRow;
+    const writeup = chainRow.writeup && typeof chainRow.writeup === 'object' ? { ...chainRow.writeup } : null;
+    if (!writeup || !Array.isArray(writeup.passos_ataque)) return chainRow;
+
+    const passosNormalizados = writeup.passos_ataque.map((p) => ({
+        ...p,
+        epss_score: typeof p.epss_score === 'number' ? p.epss_score : Number(p.epss_score || 0),
+        mitre_attack: p.mitre_attack || resolverMitrePasso(p.primitiva, p.cwe)
+    }));
+
+    const taticas = Array.isArray(writeup.taticas_mitre) && writeup.taticas_mitre.length > 0
+        ? writeup.taticas_mitre
+        : [...new Set(passosNormalizados.map((p) => `${p.mitre_attack.tactic_id} (${p.mitre_attack.technique_id})`))];
+
+    const maxEpss = typeof writeup.max_epss === 'number'
+        ? writeup.max_epss
+        : Math.max(0, ...passosNormalizados.map((p) => Number(p.epss_score || 0)));
+
+    return {
+        ...chainRow,
+        writeup: {
+            ...writeup,
+            max_epss: maxEpss,
+            taticas_mitre: taticas,
+            passos_ataque: passosNormalizados
+        }
+    };
+}
+
 const TECH_PALETTE = {
     'Microsoft / Windows': '#00d4ff',
     'PHP Ecosystem': '#38bdf8',
@@ -129,6 +259,7 @@ function gerarChainsPadrao() {
                         nota_cvss: 10.0,
                         cwe: "CWE-306",
                         cisa_kev: true,
+                        epss_score: 0.9421,
                         acao: "Criação de Conta com Privilégio 15 via Web UI desprotegida.",
                         detalhe: "O invasor interage diretamente com a interface web de gerenciamento do IOS XE sem autenticação para registrar uma nova conta administrativa."
                     },
@@ -139,6 +270,7 @@ function gerarChainsPadrao() {
                         nota_cvss: 7.2,
                         cwe: "CWE-78",
                         cisa_kev: true,
+                        epss_score: 0.9185,
                         acao: "Injeção de Comandos como Root e Instalação de Implante Malicioso.",
                         detalhe: "Utilizando a nova conta de privilégio 15, explora a injeção no mecanismo de configuração para salvar um implante persistente no filesystem."
                     }
@@ -176,6 +308,7 @@ function gerarChainsPadrao() {
                         nota_cvss: 9.8,
                         cwe: "CWE-287",
                         cisa_kev: true,
+                        epss_score: 0.8934,
                         acao: "Bypass de Autenticação via NTLM Relay no Microsoft Exchange Server.",
                         detalhe: "O invasor intercepta e faz relay de credenciais NTLM de um cliente para o Exchange Server, autenticando-se como a vítima."
                     },
@@ -186,6 +319,7 @@ function gerarChainsPadrao() {
                         nota_cvss: 9.8,
                         cwe: "CWE-94",
                         cisa_kev: true,
+                        epss_score: 0.9312,
                         acao: "Execução Remota de Código via Moniker Link no Microsoft Outlook.",
                         detalhe: "Com o acesso obtido, envia e-mails contendo links maliciosos no protocolo file:// que burla o Modo Protegido do Outlook e executa binário externo."
                     }
@@ -223,6 +357,7 @@ function gerarChainsPadrao() {
                         nota_cvss: 8.6,
                         cwe: "CWE-200",
                         cisa_kev: true,
+                        epss_score: 0.8415,
                         acao: "Container Breakout via Leaked File Descriptor (runc).",
                         detalhe: "O atacante abusa de descritores de arquivos abertos durante a inicialização do container para acessar o filesystem do host (/proc/self/cwd)."
                     },
@@ -233,6 +368,7 @@ function gerarChainsPadrao() {
                         nota_cvss: 7.8,
                         cwe: "CWE-416",
                         cisa_kev: true,
+                        epss_score: 0.8764,
                         acao: "Escalação Local de Privilégios para Root via Use-After-Free no nf_tables.",
                         detalhe: "No host, explora corrupção de memória no netfilter/nf_tables do kernel para sobrescrever credenciais de processo e obter UID 0."
                     }
@@ -270,6 +406,7 @@ function gerarChainsPadrao() {
                         nota_cvss: 7.5,
                         cwe: "CWE-22",
                         cisa_kev: false,
+                        epss_score: 0.4210,
                         acao: "Acesso Inicial / Leitura de Arquivos Sensíveis via Directory Traversal.",
                         detalhe: "Requisições HTTP forjadas exploram roteamento estático mal configurado para extrair variáveis de ambiente e chaves de sessão."
                     },
@@ -280,6 +417,7 @@ function gerarChainsPadrao() {
                         nota_cvss: 9.8,
                         cwe: "CWE-22",
                         cisa_kev: true,
+                        epss_score: 0.8842,
                         acao: "Pivoting / Execução Arbitrária com Credenciais Exfiltradas.",
                         detalhe: "Utilizando os artefatos exfiltrados no Passo 1, forja requisições autenticadas/assinadas que disparam execução remota no container web."
                     }
@@ -305,6 +443,11 @@ async function obterStats() {
         return memoryCache.stats.data;
     }
 
+    await garantirSchemaRecente();
+    const epssAggSql = schemaSuportaEpss
+        ? 'COALESCE(SUM(CASE WHEN epss_score >= 0.1 THEN 1 ELSE 0 END), 0) as epss_alto_total,'
+        : '0 as epss_alto_total,';
+
     const query = `
         SELECT 
             COUNT(*) as total_ameacas,
@@ -313,6 +456,7 @@ async function obterStats() {
             COALESCE(SUM(CASE WHEN nota_cvss >= 4.0 AND nota_cvss < 7.0 THEN 1 ELSE 0 END), 0) as medias,
             COALESCE(SUM(CASE WHEN nota_cvss > 0.0 AND nota_cvss < 4.0 THEN 1 ELSE 0 END), 0) as baixas,
             COALESCE(SUM(CASE WHEN cisa_kev = TRUE THEN 1 ELSE 0 END), 0) as cisa_kev_total,
+            ${epssAggSql}
             COALESCE(MAX(nota_cvss), 0) as pior_risco,
             COALESCE(ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2), 0) as media_score
         FROM threats;
@@ -388,6 +532,7 @@ async function obterChains(limit = 50) {
         chainsRetornadas = gerarChainsPadrao();
     }
 
+    chainsRetornadas = chainsRetornadas.map(normalizarChainRow);
     memoryCache.chains = { data: chainsRetornadas, expiresAt: agora + CACHE_TTL_MS };
     return chainsRetornadas.slice(0, limiteSeguro);
 }
@@ -440,11 +585,13 @@ async function obterDefaultThreats(limit = 25) {
         return entry.data;
     }
 
+    await garantirSchemaRecente();
     const dataQuery = `
         SELECT 
             cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, 
             COALESCE(data_publicacao, data_extracao) AS data_extracao,
-            data_publicacao, data_modificacao, cwe, cisa_kev
+            data_publicacao, data_modificacao, cwe, cisa_kev,
+            ${colunasEpssSelect()}
         FROM threats 
         ORDER BY nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC 
         LIMIT $1;
@@ -580,7 +727,7 @@ app.get('/api/threats/chains', async (req, res) => {
         res.json(chains);
     } catch (error) {
         console.error("[-] Erro ao buscar exploit chains:", error.message);
-        res.json(gerarChainsPadrao());
+        res.json(gerarChainsPadrao().map(normalizarChainRow));
     }
 });
 
@@ -599,12 +746,14 @@ app.get('/api/threats/clusters', async (req, res) => {
 // Rota 5: Lista das Maiores Ameaças Críticas / Altas (Score >= 7.0)
 app.get('/api/threats/critical', async (req, res) => {
     try {
+        await garantirSchemaRecente();
         const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 100, 1000));
         const query = `
             SELECT 
                 cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, 
                 COALESCE(data_publicacao, data_extracao) AS data_extracao,
-                data_publicacao, data_modificacao, cwe, cisa_kev
+                data_publicacao, data_modificacao, cwe, cisa_kev,
+                ${colunasEpssSelect()}
             FROM threats 
             WHERE nota_cvss >= 7.0 
             ORDER BY nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC 
@@ -629,6 +778,8 @@ const PRIMITIVAS_VALIDAS = new Set([
     'DENIAL_OF_SERVICE',
     'GENERIC_VULN'
 ]);
+
+const ORDENACOES_VALIDAS = new Set(['cvss_desc', 'recent', 'epss_desc', 'kev_first']);
 
 // Rota 6: Consulta Paginada de Alta Performance com Full-Text Search (GIN) e Filtros
 app.get('/api/threats', async (req, res) => {
@@ -656,6 +807,17 @@ app.get('/api/threats', async (req, res) => {
         const cluster = req.query.cluster && req.query.cluster !== 'TODOS'
             ? String(req.query.cluster).slice(0, 150).replace(/\0/g, '').trim()
             : null;
+        const technology = req.query.technology && req.query.technology !== 'TODOS'
+            ? String(req.query.technology).slice(0, 100).replace(/\0/g, '').trim()
+            : null;
+
+        const parsedMinEpss = req.query.min_epss !== undefined ? parseFloat(req.query.min_epss) : 0;
+        const minEpss = Number.isFinite(parsedMinEpss) && parsedMinEpss > 0
+            ? Math.min(1.0, parsedMinEpss)
+            : 0;
+
+        const inputSort = req.query.sort ? String(req.query.sort).toLowerCase().trim() : 'cvss_desc';
+        const sortMode = ORDENACOES_VALIDAS.has(inputSort) ? inputSort : 'cvss_desc';
 
         // Otimização de Performance: Se for a página inicial padrão sem filtros, serve direto do cache em RAM
         if (
@@ -665,12 +827,17 @@ app.get('/api/threats', async (req, res) => {
             !primitive &&
             !kevOnly &&
             !cluster &&
+            !technology &&
+            !(minEpss > 0) &&
+            sortMode === 'cvss_desc' &&
             (limit === 25 || limit === 10 || limit === 50)
         ) {
             const cachedResult = await obterDefaultThreats(limit);
             res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
             return res.json(cachedResult);
         }
+
+        await garantirSchemaRecente();
 
         const offset = (page - 1) * limit;
         let whereClauses = [];
@@ -715,6 +882,16 @@ app.get('/api/threats', async (req, res) => {
             whereClauses.push(`cluster_label = $${queryParams.length}`);
         }
 
+        if (technology) {
+            queryParams.push(technology);
+            whereClauses.push(`tecnologia = $${queryParams.length}`);
+        }
+
+        if (minEpss > 0 && schemaSuportaEpss) {
+            queryParams.push(minEpss);
+            whereClauses.push(`COALESCE(epss_score, 0) >= $${queryParams.length}`);
+        }
+
         const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
         // Contagem total otimizada: reutiliza o total de ameaças em cache caso não haja filtros
@@ -727,7 +904,20 @@ app.get('/api/threats', async (req, res) => {
             totalRegistros = parseInt(countResult.rows[0].total, 10);
         }
 
-        // Busca paginada com ordenação otimizada por índice
+        // Busca paginada com ordenação dinâmica por whitelist segura
+        let orderBySql = 'nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC';
+        if (sortMode === 'recent') {
+            orderBySql = 'COALESCE(data_publicacao, data_extracao) DESC, nota_cvss DESC';
+        } else if (sortMode === 'epss_desc') {
+            orderBySql = schemaSuportaEpss
+                ? 'COALESCE(epss_score, 0) DESC, nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC'
+                : 'nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC';
+        } else if (sortMode === 'kev_first') {
+            orderBySql = schemaSuportaEpss
+                ? 'cisa_kev DESC, COALESCE(epss_score, 0) DESC, nota_cvss DESC'
+                : 'cisa_kev DESC, nota_cvss DESC';
+        }
+
         queryParams.push(limit);
         const limitParamIndex = queryParams.length;
         queryParams.push(offset);
@@ -737,10 +927,11 @@ app.get('/api/threats', async (req, res) => {
             SELECT 
                 cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, 
                 COALESCE(data_publicacao, data_extracao) AS data_extracao,
-                data_publicacao, data_modificacao, cwe, cisa_kev
+                data_publicacao, data_modificacao, cwe, cisa_kev,
+                ${colunasEpssSelect()}
             FROM threats 
             ${whereSql}
-            ORDER BY nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC 
+            ORDER BY ${orderBySql}
             LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex};
         `;
         const { rows } = await pool.query(dataQuery, queryParams);
@@ -775,6 +966,7 @@ async function preAquecerCache() {
     try {
         console.log('[+] [Cache Engine] Pré-aquecendo cache em RAM no boot do servidor...');
         const t0 = Date.now();
+        await garantirSchemaRecente();
         const [analytics, chains, clusters, initialThreats] = await Promise.all([
             obterAnalytics(),
             obterChains(50),
@@ -800,32 +992,45 @@ async function preAquecerCache() {
     }
 }
 
-const server = app.listen(port, () => {
-    console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Compression + RAM Cache + GIN FTS + ML Chains Ativos]`);
-    preAquecerCache();
-});
-
-let encerrando = false;
-function encerrarServidorGraciosamente(sinal) {
-    if (encerrando) return;
-    encerrando = true;
-    console.log(`[!] Sinal ${sinal} recebido. Encerrando conexões HTTP e pool PostgreSQL...`);
-    server.close(async () => {
-        try {
-            await pool.end();
-            console.log('[+] Pool PostgreSQL encerrado com sucesso.');
-        } catch (err) {
-            console.error('[-] Erro ao encerrar pool PostgreSQL:', err.message);
-        } finally {
-            process.exit(0);
-        }
+if (require.main === module) {
+    const server = app.listen(port, () => {
+        console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Compression + RAM Cache + GIN FTS + ML Chains Ativos]`);
+        preAquecerCache();
     });
 
-    setTimeout(() => {
-        console.warn('[!] Tempo limite de shutdown atingido. Forçando encerramento.');
-        process.exit(1);
-    }, 10000).unref();
+    let encerrando = false;
+    function encerrarServidorGraciosamente(sinal) {
+        if (encerrando) return;
+        encerrando = true;
+        console.log(`[!] Sinal ${sinal} recebido. Encerrando conexões HTTP e pool PostgreSQL...`);
+        server.close(async () => {
+            try {
+                await pool.end();
+                console.log('[+] Pool PostgreSQL encerrado com sucesso.');
+            } catch (err) {
+                console.error('[-] Erro ao encerrar pool PostgreSQL:', err.message);
+            } finally {
+                process.exit(0);
+            }
+        });
+
+        setTimeout(() => {
+            console.warn('[!] Tempo limite de shutdown atingido. Forçando encerramento.');
+            process.exit(1);
+        }, 10000).unref();
+    }
+
+    process.on('SIGTERM', () => encerrarServidorGraciosamente('SIGTERM'));
+    process.on('SIGINT', () => encerrarServidorGraciosamente('SIGINT'));
 }
 
-process.on('SIGTERM', () => encerrarServidorGraciosamente('SIGTERM'));
-process.on('SIGINT', () => encerrarServidorGraciosamente('SIGINT'));
+module.exports = {
+    app,
+    limparCache,
+    compararSegredoSeguro,
+    preAquecerCache,
+    garantirSchemaRecente,
+    resetarEstadoSchema,
+    resolverMitrePasso,
+    normalizarChainRow
+};
