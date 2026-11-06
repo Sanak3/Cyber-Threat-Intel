@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import psycopg2
 from psycopg2.extras import execute_values
@@ -158,6 +159,7 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
         # Criação de índices B-Tree e GIN Full-Text Search para queries ultra-rápidas
         create_indexes_query = """
         CREATE INDEX IF NOT EXISTS idx_threats_cvss_data ON threats (nota_cvss DESC, data_extracao DESC);
+        CREATE INDEX IF NOT EXISTS idx_threats_cvss_pub ON threats (nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC);
         CREATE INDEX IF NOT EXISTS idx_threats_pub_date ON threats (data_publicacao DESC);
         CREATE INDEX IF NOT EXISTS idx_threats_cwe ON threats (cwe);
         CREATE INDEX IF NOT EXISTS idx_threats_cisa_kev ON threats (cisa_kev);
@@ -278,4 +280,5 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
 
 
 if __name__ == "__main__":
-    upload_to_aws(total_registros=10000, batch_size=1000)
+    sucesso = upload_to_aws(total_registros=10000, batch_size=1000)
+    sys.exit(0 if sucesso else 1)
