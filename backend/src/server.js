@@ -577,14 +577,21 @@ app.get('/api/threats', async (req, res) => {
         let queryParams = [];
 
         if (rawSearch) {
+            // Escapa curingas SQL (% e _) para prevenir degradação de performance por wildcard injection
+            const escapedLikeSearch = rawSearch.replace(/([%_\\])/g, '\\$1');
+
+            queryParams.push(escapedLikeSearch);
+            const pLike = queryParams.length;
+
             queryParams.push(rawSearch);
-            const p = queryParams.length;
+            const pFts = queryParams.length;
+
+            // Busca otimizada: FTS utiliza o índice GIN (idx_threats_fts) sem o OR descricao ILIKE que forçava Seq Scan
             whereClauses.push(`(
-                cve_id ILIKE '%' || $${p} || '%'
-                OR to_tsvector('english', coalesce(descricao, '')) @@ plainto_tsquery('english', $${p})
-                OR descricao ILIKE '%' || $${p} || '%'
-                OR tecnologia ILIKE '%' || $${p} || '%'
-                OR cluster_label ILIKE '%' || $${p} || '%'
+                cve_id ILIKE '%' || $${pLike} || '%'
+                OR to_tsvector('english', coalesce(descricao, '')) @@ plainto_tsquery('english', $${pFts})
+                OR tecnologia ILIKE '%' || $${pLike} || '%'
+                OR cluster_label ILIKE '%' || $${pLike} || '%'
             )`);
         }
 
