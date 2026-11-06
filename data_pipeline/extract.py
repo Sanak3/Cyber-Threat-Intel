@@ -66,21 +66,41 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_re
 
     try:
         # Se buscar_mais_recentes estiver ativo e sem filtro de janela de datas,
-        # calcula startIndex a partir do totalResults global da API do NIST
+        # calcula startIndex a partir do totalResults global da API do NIST (com retry resiliente)
         if buscar_mais_recentes and not date_params:
-            try:
-                print("[*] [ETL Extract] Consultando metadados do catálogo global para calcular offset das vulnerabilidades mais recentes...")
-                discovery_res = session.get(f"{base_url}?resultsPerPage=1", timeout=30)
-                if discovery_res.status_code == 200:
+            print("[*] [ETL Extract] Consultando metadados do catálogo global para calcular offset das vulnerabilidades mais recentes...")
+            descoberta_ok = False
+            for tentativa_disc in range(1, 4):
+                try:
+                    discovery_res = session.get(f"{base_url}?resultsPerPage=1", timeout=30)
+                    if discovery_res.status_code == 429:
+                        print(f"[-] [RATE LIMIT 429] Aguardando 30s na descoberta de offset (Tentativa {tentativa_disc}/3)...")
+                        time.sleep(30)
+                        continue
+                    if discovery_res.status_code in [503, 504]:
+                        espera = 2 ** tentativa_disc * 3
+                        print(f"[-] [HTTP {discovery_res.status_code}] NIST ocupado na descoberta. Backoff de {espera}s (Tentativa {tentativa_disc}/3)...")
+                        time.sleep(espera)
+                        continue
+
+                    discovery_res.raise_for_status()
                     total_global = discovery_res.json().get("totalResults", 0)
                     if total_global > total_desejado:
                         start_index = total_global - total_desejado
                         print(f"[+] [ETL Extract] Catálogo possui {total_global:,} CVEs. Iniciando no offset {start_index:,} para baixar os {total_desejado:,} registros mais recentes.")
                     else:
                         print(f"[*] [ETL Extract] Catálogo possui {total_global:,} registros. Iniciando de startIndex=0.")
-            except Exception as e_disc:
-                print(f"[!] [ETL Extract] Aviso na descoberta de offset recente ({e_disc}). Iniciando em startIndex=0.")
-                start_index = 0
+                    descoberta_ok = True
+                    time.sleep(delay_requisicao)
+                    break
+                except requests.exceptions.RequestException as e_disc:
+                    espera = 2 ** tentativa_disc * 2
+                    print(f"[!] [ETL Extract] Erro ao consultar offset recente ({e_disc}). Retry em {espera}s ({tentativa_disc}/3)...")
+                    time.sleep(espera)
+
+            if not descoberta_ok:
+                print("[-] [FALHA CRÍTICA] Não foi possível determinar o offset recente do NIST. Abortando para evitar ingestão de registros legados de 1999.")
+                return None
 
         total_lotes = (total_desejado + max_por_pagina - 1) // max_por_pagina
 

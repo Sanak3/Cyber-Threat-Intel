@@ -39,7 +39,7 @@ def notificar_flush_cache():
         print(f"[!] [ETL Load] Aviso: Não foi possível notificar flush de cache: {e_webhook}")
 
 
-def upload_to_aws(total_registros=10000, batch_size=1000):
+def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=True):
     """
     Executa o pipeline ETL ponta a ponta:
     1. Extração paginada de até N registros da API do NIST NVD.
@@ -196,6 +196,16 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
 
         print(f"[+] [ETL Load] Gravando {len(registros_tuplas):,} registros únicos via execute_values (lotes de {batch_size:,})...")
         inicio_banco = time.time()
+
+        # Na carga completa, substitui integralmente os dados legados (ex: CVEs de 1999)
+        # dentro da mesma transação atômica (se falhar antes do commit, o rollback restaura tudo).
+        limite_seguranca_truncate = max(1, int(total_registros * 0.5))
+        if limpar_base_antiga and len(registros_tuplas) >= limite_seguranca_truncate:
+            print("[*] [ETL Load] Executando TRUNCATE TABLE threats, exploit_chains para expurgar registros legados...")
+            cursor.execute("TRUNCATE TABLE threats, exploit_chains;")
+        elif limpar_base_antiga and len(registros_tuplas) > 0:
+            print("[*] [ETL Load] Carga parcial detectada: removendo registros legados sem data_publicacao...")
+            cursor.execute("DELETE FROM threats WHERE data_publicacao IS NULL;")
 
         execute_values(
             cur=cursor,
