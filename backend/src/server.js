@@ -401,9 +401,12 @@ async function obterDefaultThreats(limit = 25) {
     }
 
     const dataQuery = `
-        SELECT cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, data_extracao 
+        SELECT 
+            cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, 
+            COALESCE(data_publicacao, data_extracao) AS data_extracao,
+            data_publicacao, data_modificacao, cwe, cisa_kev
         FROM threats 
-        ORDER BY nota_cvss DESC, data_extracao DESC 
+        ORDER BY nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC 
         LIMIT $1;
     `;
     const { rows } = await pool.query(dataQuery, [limit]);
@@ -540,10 +543,13 @@ app.get('/api/threats/critical', async (req, res) => {
     try {
         const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 100, 1000));
         const query = `
-            SELECT cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, data_extracao 
+            SELECT 
+                cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, 
+                COALESCE(data_publicacao, data_extracao) AS data_extracao,
+                data_publicacao, data_modificacao, cwe, cisa_kev
             FROM threats 
             WHERE nota_cvss >= 7.0 
-            ORDER BY nota_cvss DESC, data_extracao DESC 
+            ORDER BY nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC 
             LIMIT $1;
         `;
         const { rows } = await pool.query(query, [limit]);
@@ -647,10 +653,13 @@ app.get('/api/threats', async (req, res) => {
         const offsetParamIndex = queryParams.length;
 
         const dataQuery = `
-            SELECT cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, data_extracao 
+            SELECT 
+                cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label, 
+                COALESCE(data_publicacao, data_extracao) AS data_extracao,
+                data_publicacao, data_modificacao, cwe, cisa_kev
             FROM threats 
             ${whereSql}
-            ORDER BY nota_cvss DESC, data_extracao DESC 
+            ORDER BY nota_cvss DESC, COALESCE(data_publicacao, data_extracao) DESC 
             LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex};
         `;
         const { rows } = await pool.query(dataQuery, queryParams);

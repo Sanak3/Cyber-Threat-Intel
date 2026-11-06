@@ -110,11 +110,53 @@ def transformar_dados(dados_brutos):
             else:
                 severidade = "LOW"
 
+        # Extração de datas oficiais do NIST
+        data_publicacao = cve.get("published")
+        data_modificacao = cve.get("lastModified")
+
+        # Extração de fraqueza estruturada (CWE)
+        cwe_extraido = "NVD-CWE-noinfo"
+        for w in cve.get("weaknesses", []):
+            for desc in w.get("description", []):
+                val = desc.get("value", "")
+                if val.startswith("CWE-") and val not in ["NVD-CWE-noinfo", "NVD-CWE-Other"]:
+                    cwe_extraido = val
+                    break
+            if cwe_extraido != "NVD-CWE-noinfo":
+                break
+
+        # Extração de produto e fabricante via CPE estruturado (Configurations)
+        cpe_vendor = None
+        cpe_product = None
+        for config in cve.get("configurations", []):
+            for node in config.get("nodes", []):
+                for match in node.get("cpeMatch", []):
+                    crit = match.get("criteria", "")
+                    if crit.startswith("cpe:2.3:"):
+                        parts = crit.split(":")
+                        if len(parts) > 5:
+                            cpe_vendor = parts[3]
+                            cpe_product = parts[4]
+                            break
+                if cpe_vendor:
+                    break
+            if cpe_vendor:
+                break
+
+        # Catálogo CISA KEV (Known Exploited Vulnerabilities - Exploited in the Wild)
+        cisa_kev = bool(cve.get("cisaExploitAdd"))
+
         vulnerabilidades_limpas.append({
             "id_cve": id_cve,
             "descricao": descricao,
             "nota_cvss": nota,
-            "severidade": severidade
+            "severidade": severidade,
+            "data_publicacao": data_publicacao,
+            "data_modificacao": data_modificacao,
+            "cwe": cwe_extraido,
+            "cpe_vendor": cpe_vendor,
+            "cpe_product": cpe_product,
+            "cisa_kev": cisa_kev
         })
 
         if nota > 0.0:

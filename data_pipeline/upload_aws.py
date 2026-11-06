@@ -12,6 +12,33 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 load_dotenv()
 
 
+def notificar_flush_cache():
+    """
+    Dispara webhook autenticado para o backend invalidar o cache em RAM
+    logo após a sincronização bem-sucedida de novos dados no banco.
+    """
+    api_url = os.getenv("API_URL") or os.getenv("BACKEND_URL")
+    webhook_secret = os.getenv("INTERNAL_WEBHOOK_SECRET")
+
+    if not api_url or not webhook_secret:
+        return
+
+    import requests
+    try:
+        url = f"{api_url.rstrip('/')}/api/internal/cache-flush"
+        res = requests.post(
+            url,
+            headers={"X-Webhook-Secret": webhook_secret},
+            timeout=10
+        )
+        if res.status_code == 200:
+            print("[+] [ETL Load] Cache do Backend invalidado com sucesso via Webhook.")
+        else:
+            print(f"[!] [ETL Load] Falha ao acionar flush de cache no backend: HTTP {res.status_code}")
+    except Exception as e_webhook:
+        print(f"[!] [ETL Load] Aviso: Não foi possível notificar flush de cache: {e_webhook}")
+
+
 def upload_to_aws(total_registros=10000, batch_size=1000):
     """
     Executa o pipeline ETL ponta a ponta:
@@ -51,7 +78,7 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
     if total_duplicados > 0:
         print(f"[!] [ETL Load] Deduplicação em memória: {total_duplicados:,} CVEs repetidos descartados ({len(vulnerabilidades_unicas):,} únicos para gravação).")
 
-    # 4. Preparação das tuplas para inserção em lote (com colunas de ML)
+    # 4. Preparação das tuplas para inserção em lote (com colunas de ML, datas oficiais NIST e KEV)
     registros_tuplas = [
         (
             item["id_cve"],
@@ -60,7 +87,13 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
             item["severidade"],
             item.get("primitiva", "GENERIC_VULN"),
             item.get("tecnologia", "Desconhecido / Geral"),
-            item.get("cluster_label", "Geral / Não Clusterizado")
+            item.get("cluster_label", "Geral / Não Clusterizado"),
+            item.get("data_publicacao"),
+            item.get("data_modificacao"),
+            item.get("cwe", "NVD-CWE-noinfo"),
+            item.get("cpe_vendor"),
+            item.get("cpe_product"),
+            bool(item.get("cisa_kev", False))
         )
         for item in vulnerabilidades_unicas
     ]
@@ -81,7 +114,7 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         )
         cursor = conn.cursor()
 
-        # Garante a existência da tabela threats com colunas de ML
+        # Garante a existência da tabela threats com colunas de ML e metadados estruturados
         create_table_query = """
         CREATE TABLE IF NOT EXISTS threats (
             cve_id VARCHAR(50) PRIMARY KEY,
@@ -91,11 +124,23 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
             primitiva VARCHAR(50) DEFAULT 'GENERIC_VULN',
             tecnologia VARCHAR(100) DEFAULT 'Desconhecido / Geral',
             cluster_label VARCHAR(150) DEFAULT 'Geral / Não Clusterizado',
+            data_publicacao TIMESTAMP,
+            data_modificacao TIMESTAMP,
+            cwe VARCHAR(50) DEFAULT 'NVD-CWE-noinfo',
+            cpe_vendor VARCHAR(100),
+            cpe_product VARCHAR(100),
+            cisa_kev BOOLEAN DEFAULT FALSE,
             data_extracao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         ALTER TABLE threats ADD COLUMN IF NOT EXISTS primitiva VARCHAR(50) DEFAULT 'GENERIC_VULN';
         ALTER TABLE threats ADD COLUMN IF NOT EXISTS tecnologia VARCHAR(100) DEFAULT 'Desconhecido / Geral';
         ALTER TABLE threats ADD COLUMN IF NOT EXISTS cluster_label VARCHAR(150) DEFAULT 'Geral / Não Clusterizado';
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS data_publicacao TIMESTAMP;
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS data_modificacao TIMESTAMP;
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS cwe VARCHAR(50) DEFAULT 'NVD-CWE-noinfo';
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS cpe_vendor VARCHAR(100);
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS cpe_product VARCHAR(100);
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS cisa_kev BOOLEAN DEFAULT FALSE;
 
         -- Tabela dedicada para Exploit Chains e Blueprints
         CREATE TABLE IF NOT EXISTS exploit_chains (
@@ -113,6 +158,9 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         # Criação de índices B-Tree e GIN Full-Text Search para queries ultra-rápidas
         create_indexes_query = """
         CREATE INDEX IF NOT EXISTS idx_threats_cvss_data ON threats (nota_cvss DESC, data_extracao DESC);
+        CREATE INDEX IF NOT EXISTS idx_threats_pub_date ON threats (data_publicacao DESC);
+        CREATE INDEX IF NOT EXISTS idx_threats_cwe ON threats (cwe);
+        CREATE INDEX IF NOT EXISTS idx_threats_cisa_kev ON threats (cisa_kev);
         CREATE INDEX IF NOT EXISTS idx_threats_severidade ON threats (severidade);
         CREATE INDEX IF NOT EXISTS idx_threats_tecnologia ON threats (tecnologia);
         CREATE INDEX IF NOT EXISTS idx_threats_cluster ON threats (cluster_label);
@@ -125,7 +173,10 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
 
         # Query de Upsert em lote de alta performance para threats
         upsert_query = """
-        INSERT INTO threats (cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label)
+        INSERT INTO threats (
+            cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label,
+            data_publicacao, data_modificacao, cwe, cpe_vendor, cpe_product, cisa_kev
+        )
         VALUES %s
         ON CONFLICT (cve_id) DO UPDATE SET
             descricao = EXCLUDED.descricao,
@@ -134,6 +185,12 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
             primitiva = EXCLUDED.primitiva,
             tecnologia = EXCLUDED.tecnologia,
             cluster_label = EXCLUDED.cluster_label,
+            data_publicacao = EXCLUDED.data_publicacao,
+            data_modificacao = EXCLUDED.data_modificacao,
+            cwe = EXCLUDED.cwe,
+            cpe_vendor = EXCLUDED.cpe_vendor,
+            cpe_product = EXCLUDED.cpe_product,
+            cisa_kev = EXCLUDED.cisa_kev,
             data_extracao = CURRENT_TIMESTAMP;
         """
 
@@ -184,6 +241,9 @@ def upload_to_aws(total_registros=10000, batch_size=1000):
         duracao_banco = time.time() - inicio_banco
 
         print(f"[+] [ETL Load] SUCESSO: {len(registros_tuplas):,} registros sincronizados no AWS RDS em {duracao_banco:.2f}s!")
+
+        # Notifica o backend para invalidar imediatamente o cache em RAM
+        notificar_flush_cache()
 
         duracao_total = time.time() - inicio_total
         print(f"\n[+] Pipeline ETL concluído com êxito em {duracao_total:.1f}s.")

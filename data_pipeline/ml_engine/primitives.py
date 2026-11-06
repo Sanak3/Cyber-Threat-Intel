@@ -74,12 +74,90 @@ TECH_PATTERNS = {
     "Fortinet / SonicWall": [r"\b(fortinet|fortios|fortigate|sonicwall)\b"]
 }
 
+# Mapeamento determinístico de CWEs para Primitivas de Ataque da Cyber Kill Chain
+CWE_PRIMITIVE_MAP = {
+    # RCE / Injeção / Corrupção de Memória
+    "CWE-89": AttackPrimitive.INJECTION_RCE,
+    "CWE-78": AttackPrimitive.INJECTION_RCE,
+    "CWE-94": AttackPrimitive.INJECTION_RCE,
+    "CWE-77": AttackPrimitive.INJECTION_RCE,
+    "CWE-502": AttackPrimitive.INJECTION_RCE,
+    "CWE-119": AttackPrimitive.INJECTION_RCE,
+    "CWE-120": AttackPrimitive.INJECTION_RCE,
+    "CWE-121": AttackPrimitive.INJECTION_RCE,
+    "CWE-122": AttackPrimitive.INJECTION_RCE,
+    "CWE-416": AttackPrimitive.INJECTION_RCE,
+    "CWE-787": AttackPrimitive.INJECTION_RCE,
+    "CWE-79": AttackPrimitive.INJECTION_RCE,
+    "CWE-434": AttackPrimitive.INJECTION_RCE,
 
-def extrair_primitiva(descricao: str) -> Dict[str, Any]:
+    # Bypass de Autenticação & Quebra de Controle de Acesso
+    "CWE-287": AttackPrimitive.AUTH_BYPASS,
+    "CWE-306": AttackPrimitive.AUTH_BYPASS,
+    "CWE-862": AttackPrimitive.AUTH_BYPASS,
+    "CWE-863": AttackPrimitive.AUTH_BYPASS,
+    "CWE-284": AttackPrimitive.AUTH_BYPASS,
+    "CWE-384": AttackPrimitive.AUTH_BYPASS,
+    "CWE-640": AttackPrimitive.AUTH_BYPASS,
+
+    # Escalação de Privilégios (PrivEsc / LPE)
+    "CWE-269": AttackPrimitive.PRIV_ESC,
+    "CWE-250": AttackPrimitive.PRIV_ESC,
+    "CWE-732": AttackPrimitive.PRIV_ESC,
+    "CWE-276": AttackPrimitive.PRIV_ESC,
+
+    # Reconhecimento & Vazamento de Informações
+    "CWE-200": AttackPrimitive.RECON_INFO_LEAK,
+    "CWE-22": AttackPrimitive.RECON_INFO_LEAK,
+    "CWE-918": AttackPrimitive.RECON_INFO_LEAK,
+    "CWE-125": AttackPrimitive.RECON_INFO_LEAK,
+    "CWE-532": AttackPrimitive.RECON_INFO_LEAK,
+    "CWE-319": AttackPrimitive.RECON_INFO_LEAK,
+
+    # Negação de Serviço (DoS / Crash)
+    "CWE-400": AttackPrimitive.DENIAL_OF_SERVICE,
+    "CWE-476": AttackPrimitive.DENIAL_OF_SERVICE,
+    "CWE-835": AttackPrimitive.DENIAL_OF_SERVICE
+}
+
+CPE_VENDOR_MAP = {
+    "microsoft": "Microsoft / Windows",
+    "linux": "Linux / Kernel",
+    "canonical": "Linux / Kernel",
+    "redhat": "Linux / Kernel",
+    "debian": "Linux / Kernel",
+    "apache": "Apache Foundation",
+    "cisco": "Cisco Systems",
+    "apple": "Apple",
+    "google": "Google / Android",
+    "oracle": "Oracle",
+    "wordpress": "WordPress",
+    "gitlab": "GitLab / DevOps",
+    "github": "GitLab / DevOps",
+    "docker": "GitLab / DevOps",
+    "jenkins": "GitLab / DevOps",
+    "vmware": "VMware",
+    "php": "PHP Ecosystem",
+    "openssl": "OpenSSL / Crypto",
+    "fortinet": "Fortinet / SonicWall",
+    "sonicwall": "Fortinet / SonicWall"
+}
+
+
+def extrair_primitiva(descricao: str, cwe: str = None) -> Dict[str, Any]:
     """
-    Analisa a descrição da vulnerabilidade e infere a primitiva de ataque
-    e seu estágio correspondente na Cyber Kill Chain.
+    Analisa CWE estruturado e descrição técnica da vulnerabilidade,
+    inferindo a primitiva de ataque e seu estágio na Cyber Kill Chain.
     """
+    # 1. Prioridade para CWE estruturado do NIST (precisão determinística)
+    if cwe and cwe in CWE_PRIMITIVE_MAP:
+        prim = CWE_PRIMITIVE_MAP[cwe]
+        return {
+            "primitiva": prim,
+            "estagio": KILL_CHAIN_STAGES[prim],
+            "termo_encontrado": cwe
+        }
+
     if not descricao or not isinstance(descricao, str):
         return {
             "primitiva": AttackPrimitive.GENERIC_VULN,
@@ -89,12 +167,7 @@ def extrair_primitiva(descricao: str) -> Dict[str, Any]:
 
     texto_lower = descricao.lower()
 
-    # Checagem em ordem de impacto tático:
-    # 1. Escalação de Privilégio (LPE)
-    # 2. Execução Remota de Código / Injeção (RCE)
-    # 3. Bypass de Autenticação (Auth Bypass)
-    # 4. Reconhecimento / Vazamento de Informação (Info Leak)
-    # 5. Negação de Serviço (DoS)
+    # 2. Heurística Regex por ordem de impacto tático
     ordem_checagem = [
         AttackPrimitive.PRIV_ESC,
         AttackPrimitive.INJECTION_RCE,
@@ -121,15 +194,23 @@ def extrair_primitiva(descricao: str) -> Dict[str, Any]:
     }
 
 
-def extrair_tecnologia(descricao: str) -> str:
+def extrair_tecnologia(descricao: str, cpe_vendor: str = None, cpe_product: str = None) -> str:
     """
-    Identifica o ecossistema ou fabricante afetado a partir da descrição técnica.
+    Identifica o ecossistema ou fabricante afetado a partir do CPE estruturado
+    ou heurística de descrição técnica.
     """
+    # 1. Resolução via CPE estruturado (Configurations do NIST)
+    if cpe_vendor:
+        vendor_clean = str(cpe_vendor).lower().strip()
+        if vendor_clean in CPE_VENDOR_MAP:
+            return CPE_VENDOR_MAP[vendor_clean]
+
     if not descricao or not isinstance(descricao, str):
         return "Desconhecido / Geral"
 
     texto_lower = descricao.lower()
 
+    # 2. Regex nos padrões de ecossistemas conhecidos
     for tech_nome, patterns in TECH_PATTERNS.items():
         for pattern in patterns:
             if re.search(pattern, texto_lower):
@@ -148,7 +229,8 @@ def extrair_tecnologia(descricao: str) -> str:
 def enriquecer_vulnerabilidades(vulnerabilidades: List[Dict[str, Any]]) -> pd.DataFrame:
     """
     Recebe a lista de vulnerabilidades, enriquece com Primitivas de Ataque
-    e Tecnologia afetada, retornando um DataFrame do Pandas pronto para análise.
+    e Tecnologia afetada (utilizando dados estruturados CWE e CPE),
+    retornando um DataFrame do Pandas pronto para análise.
     """
     if not vulnerabilidades:
         return pd.DataFrame()
@@ -161,8 +243,12 @@ def enriquecer_vulnerabilidades(vulnerabilidades: List[Dict[str, Any]]) -> pd.Da
 
     for _, row in df.iterrows():
         desc = row.get("descricao", "")
-        info_primitiva = extrair_primitiva(desc)
-        tech = extrair_tecnologia(desc)
+        cwe = row.get("cwe")
+        cpe_vendor = row.get("cpe_vendor")
+        cpe_product = row.get("cpe_product")
+
+        info_primitiva = extrair_primitiva(desc, cwe=cwe)
+        tech = extrair_tecnologia(desc, cpe_vendor=cpe_vendor, cpe_product=cpe_product)
 
         primitivas.append(info_primitiva["primitiva"])
         estagios.append(info_primitiva["estagio"])
