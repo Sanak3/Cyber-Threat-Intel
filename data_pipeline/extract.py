@@ -113,6 +113,8 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_re
             print(f"\n[*] [ETL Extract] Baixando lote {lote_atual}/{total_lotes} (startIndex={start_index:,} | solicitando {results_per_page} registros)...")
 
             sucesso_lote = False
+            catalogo_esgotado = False
+            qtd_recebida = 0
             max_tentativas = 3
 
             for tentativa in range(1, max_tentativas + 1):
@@ -142,6 +144,7 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_re
                     if qtd_recebida == 0:
                         print(f"[!] [ETL Extract] Nenhum registro adicional retornado pela API no startIndex={start_index}.")
                         sucesso_lote = True
+                        catalogo_esgotado = True
                         break
 
                     todas_vulnerabilidades.extend(vulnerabilidades_pagina)
@@ -152,6 +155,7 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_re
                     # Se a API esgotar os resultados do catálogo global
                     if start_index + qtd_recebida >= total_api_results:
                         print(f"[*] Base global do NIST esgotada ({total_api_results:,} registros totais). Finalizando paginação.")
+                        catalogo_esgotado = True
                         break
 
                     break  # Sucesso no lote, avança para o próximo
@@ -175,7 +179,10 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_re
                 print(f"[!] Prosseguindo com os {len(todas_vulnerabilidades):,} registros coletados até o momento.")
                 break
 
-            start_index += results_per_page
+            if catalogo_esgotado:
+                break
+
+            start_index += qtd_recebida
 
             # Delay entre requisições para respeito ao rate limit
             if len(todas_vulnerabilidades) < total_desejado:

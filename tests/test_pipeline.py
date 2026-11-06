@@ -1,11 +1,13 @@
 import sys
 import os
 import unittest
+from unittest.mock import patch, MagicMock
 import pandas as pd
 
 # Adiciona o diretório data_pipeline ao path para importação direta
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data_pipeline")))
 
+from extract import extrair_dados_nist
 from transform import extrair_metricas_cvss, sanitizar_texto, transformar_dados
 from ml_engine.primitives import (
     AttackPrimitive,
@@ -208,6 +210,29 @@ class TestThreatPipeline(unittest.TestCase):
         self.assertEqual(nome_rce, "Remote Code Execution (RCE)")
         nome_traversal = clusterizer._gerar_nome_cluster(["directory", "traversal", "path", "read", "files"])
         self.assertEqual(nome_traversal, "Path Traversal & Arbitrary File Access")
+
+    @patch("extract.time.sleep", return_value=None)
+    @patch("extract.requests.Session")
+    def test_extrair_dados_nist_encerra_quando_catalogo_esgota(self, mock_session_cls, _mock_sleep):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.json.return_value = {
+            "totalResults": 2,
+            "vulnerabilities": [
+                {"cve": {"id": "CVE-2026-1001"}},
+                {"cve": {"id": "CVE-2026-1002"}}
+            ]
+        }
+        mock_session.get.return_value = mock_resp
+
+        resultado = extrair_dados_nist(total_desejado=100, max_por_pagina=50, janela_dias=7)
+        self.assertIsNotNone(resultado)
+        self.assertEqual(len(resultado["vulnerabilities"]), 2)
+        self.assertEqual(mock_session.get.call_count, 1)
 
 
 if __name__ == "__main__":
