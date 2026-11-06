@@ -2,12 +2,12 @@ const { Pool } = require('pg');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
-// Configuração do pool de conexão com suporte a SSL seguro
+// Configuração do pool de conexão com suporte a SSL seguro (Secure by Default)
 const sslConfig = process.env.DB_SSL === 'false'
     ? false
     : (process.env.DB_SSL_CA
-        ? { ca: process.env.DB_SSL_CA, rejectUnauthorized: true }
-        : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' });
+        ? { ca: process.env.DB_SSL_CA, rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' }
+        : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' });
 
 const pool = new Pool({
     host: process.env.DB_HOST,
