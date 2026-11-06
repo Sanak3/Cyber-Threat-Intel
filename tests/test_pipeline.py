@@ -14,6 +14,7 @@ from ml_engine.primitives import (
     enriquecer_vulnerabilidades
 )
 from ml_engine.chain_detector import ExploitChainDetector
+from ml_engine.clusterizer import CVEClusterizer
 
 
 class TestThreatPipeline(unittest.TestCase):
@@ -200,6 +201,13 @@ class TestThreatPipeline(unittest.TestCase):
         self.assertGreater(len(chains), 0)
         self.assertEqual(chains[0]["tecnologia"], "Apache Foundation")
         self.assertIn(chains[0]["severidade_chain"], ["HIGH", "CRITICAL"])
+
+    def test_clusterizer_precedencia_rce(self):
+        clusterizer = CVEClusterizer(n_clusters=6)
+        nome_rce = clusterizer._gerar_nome_cluster(["arbitrary", "code", "execution", "remote", "attacker"])
+        self.assertEqual(nome_rce, "Remote Code Execution (RCE)")
+        nome_traversal = clusterizer._gerar_nome_cluster(["directory", "traversal", "path", "read", "files"])
+        self.assertEqual(nome_traversal, "Path Traversal & Arbitrary File Access")
 
 
 if __name__ == "__main__":

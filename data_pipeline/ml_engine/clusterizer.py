@@ -30,26 +30,29 @@ class CVEClusterizer:
 
     def _gerar_nome_cluster(self, top_termos: List[str]) -> str:
         """
-        Gera um rótulo humanizado para o cluster com base nos top termos.
+        Gera um rótulo humanizado para o cluster com base nos top termos,
+        priorizando RCE antes de Path Traversal para evitar falsos positivos com 'arbitrary'.
         """
         termos_set = set(top_termos)
 
         if any(t in termos_set for t in ["overflow", "buffer", "memory", "heap", "stack", "out"]):
             return "Memory Corruption & Buffer Overflow"
-        if any(t in termos_set for t in ["sql", "injection", "sqli"]):
+        if any(t in termos_set for t in ["sql", "sqli"]):
             return "Database & SQL Injection"
-        if any(t in termos_set for t in ["xss", "cross", "scripting", "site"]):
+        if any(t in termos_set for t in ["xss", "cross", "scripting"]):
             return "Web Application & Cross-Site Scripting (XSS)"
         if any(t in termos_set for t in ["privilege", "escalation", "root", "elevation"]):
             return "Privilege Escalation & Access Gain"
         if any(t in termos_set for t in ["bypass", "authentication", "unauthenticated", "token"]):
             return "Authentication & Access Control Bypass"
+        if any(t in termos_set for t in ["remote", "code", "execution", "execute", "rce", "command"]):
+            return "Remote Code Execution (RCE)"
+        if any(t in termos_set for t in ["traversal", "directory", "path"]):
+            return "Path Traversal & Arbitrary File Access"
         if any(t in termos_set for t in ["service", "denial", "dos", "crash", "loop"]):
             return "Denial of Service & Resource Exhaustion"
-        if any(t in termos_set for t in ["traversal", "directory", "file", "arbitrary"]):
-            return "Path Traversal & Arbitrary File Access"
-        if any(t in termos_set for t in ["remote", "code", "execution", "execute"]):
-            return "Remote Code Execution (RCE)"
+        if any(t in termos_set for t in ["information", "disclosure", "exposure", "leak", "sensitive"]):
+            return "Information Disclosure & Data Leak"
 
         # Fallback usando os 3 primeiros termos
         return " / ".join([t.capitalize() for t in top_termos[:3]])
@@ -81,11 +84,19 @@ class CVEClusterizer:
         centroides = self.model.cluster_centers_
 
         self.cluster_labels = {}
+        rotulos_usados = set()
         for idx_cluster in range(self.n_clusters):
             # Índices dos top 5 termos com maior peso no centroide
             top_indices = centroides[idx_cluster].argsort()[::-1][:5]
             top_termos = list(termos[top_indices])
             rotulo = self._gerar_nome_cluster(top_termos)
+            if rotulo in rotulos_usados:
+                termo_foco = next(
+                    (t for t in top_termos if t.lower() not in rotulo.lower()),
+                    top_termos[0] if top_termos else str(idx_cluster + 1)
+                )
+                rotulo = f"{rotulo} ({termo_foco.capitalize()})"
+            rotulos_usados.add(rotulo)
             self.cluster_labels[idx_cluster] = rotulo
 
         # Avaliação de qualidade de agrupamento com Silhouette Score (amostra até 2000 pontos)

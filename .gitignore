@@ -14,10 +14,13 @@ env/
 __pycache__/
 *.pyc
 
-# Arquivos temporários e dumps de dados JSON
+# Arquivos temporários, dumps JSON e modelos ML serializados
 data_pipeline/*.json
 debug_dados_api.json
 *.jsonl
+*.joblib
+data_pipeline/ml_engine/models/
+.pytest_cache/
 
 # Dependências do Node e Builds
 backend/node_modules/
