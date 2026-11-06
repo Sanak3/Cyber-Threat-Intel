@@ -30,16 +30,32 @@ const CustomSeverityTooltip = ({ active, payload }) => {
   return null
 }
 
+const CACHE_KEYS = {
+  overview: 'cti_overview_cache_v2',
+  analytics: 'cti_analytics_cache_v2',
+  threatsPage1: 'cti_threats_page1_v2',
+  totalRegistros: 'cti_total_registros_v2',
+  lastSync: 'cti_last_sync_v2'
+}
+
+const LEGACY_CACHE_KEYS = [
+  'cti_overview_cache',
+  'cti_analytics_cache',
+  'cti_threats_page1',
+  'cti_total_registros',
+  'cti_last_sync'
+]
+
 function App() {
   const PROD_API_URL = 'https://cyber-threat-intel-mmks.onrender.com'
   const [apiUrl, setApiUrl] = useState(() => {
     return import.meta.env.VITE_API_URL || PROD_API_URL
   })
 
-  // Leitura segura do cache local consolidado para renderização instantânea (0ms)
+  // Leitura segura do cache local versionado (v2) para renderização instantânea (0ms)
   const cachedOverview = useMemo(() => {
     try {
-      const item = localStorage.getItem('cti_overview_cache') || sessionStorage.getItem('cti_overview_cache')
+      const item = localStorage.getItem(CACHE_KEYS.overview) || sessionStorage.getItem(CACHE_KEYS.overview)
       if (item) return JSON.parse(item)
     } catch {
       // fallback gracioso
@@ -68,7 +84,7 @@ function App() {
       }
     }
     try {
-      const legacy = localStorage.getItem('cti_analytics_cache') || sessionStorage.getItem('cti_analytics_cache')
+      const legacy = localStorage.getItem(CACHE_KEYS.analytics) || sessionStorage.getItem(CACHE_KEYS.analytics)
       if (legacy) return JSON.parse(legacy)
     } catch {
       // fallback
@@ -77,7 +93,7 @@ function App() {
   })
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState(() => {
     try {
-      return localStorage.getItem('cti_last_sync') || sessionStorage.getItem('cti_last_sync') || null
+      return localStorage.getItem(CACHE_KEYS.lastSync) || sessionStorage.getItem(CACHE_KEYS.lastSync) || null
     } catch {
       return null
     }
@@ -85,12 +101,16 @@ function App() {
 
   // 2. Estados da Tabela Paginada no Servidor (Instant Hydration para Página 1)
   const [ameacas, setAmeacas] = useState(() => {
+    const limiteInicial = typeof window !== 'undefined' && window.innerWidth <= 768 ? 10 : 25
     if (cachedOverview?.initialThreats?.dados) {
-      return cachedOverview.initialThreats.dados
+      return cachedOverview.initialThreats.dados.slice(0, limiteInicial)
     }
     try {
-      const cached = localStorage.getItem('cti_threats_page1') || sessionStorage.getItem('cti_threats_page1')
-      if (cached) return JSON.parse(cached)
+      const cached = localStorage.getItem(CACHE_KEYS.threatsPage1) || sessionStorage.getItem(CACHE_KEYS.threatsPage1)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        return Array.isArray(parsed) ? parsed.slice(0, limiteInicial) : []
+      }
     } catch {
       // fallback gracioso
     }
@@ -101,7 +121,7 @@ function App() {
       return Number(cachedOverview.initialThreats.total) || 0
     }
     try {
-      const cached = localStorage.getItem('cti_total_registros') || sessionStorage.getItem('cti_total_registros')
+      const cached = localStorage.getItem(CACHE_KEYS.totalRegistros) || sessionStorage.getItem(CACHE_KEYS.totalRegistros)
       if (cached) return Number(cached) || 0
     } catch {
       return 0
@@ -120,6 +140,9 @@ function App() {
   const [termoBusca, setTermoBusca] = useState('')
   const [debouncedBusca, setDebouncedBusca] = useState('')
   const [filtroSeveridade, setFiltroSeveridade] = useState('TODOS')
+  const [filtroKev, setFiltroKev] = useState(false)
+  const [filtroPrimitiva, setFiltroPrimitiva] = useState('TODOS')
+  const [filtroCluster, setFiltroCluster] = useState('TODOS')
   const [paginaAtual, setPaginaAtual] = useState(1)
   const [itensPorPagina, setItensPorPagina] = useState(() => {
     if (typeof window !== 'undefined' && window.innerWidth <= 768) {
@@ -222,11 +245,103 @@ function App() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  // Limpeza automática de chaves antigas não versionadas (remove CVEs legadas de 1999 do cache local)
+  useEffect(() => {
+    try {
+      LEGACY_CACHE_KEYS.forEach((key) => {
+        localStorage.removeItem(key)
+        sessionStorage.removeItem(key)
+      })
+    } catch {
+      // ignore storage errors
+    }
+  }, [])
+
+  // Snapshot reativo do estado de filtros/paginação para leitura segura em efeitos assíncronos
+  const uiStateRef = useRef({
+    paginaAtual,
+    debouncedBusca,
+    filtroSeveridade,
+    filtroKev,
+    filtroPrimitiva,
+    filtroCluster,
+    itensPorPagina,
+    temAmeacas: ameacas.length > 0
+  })
+
+  useEffect(() => {
+    uiStateRef.current = {
+      paginaAtual,
+      debouncedBusca,
+      filtroSeveridade,
+      filtroKev,
+      filtroPrimitiva,
+      filtroCluster,
+      itensPorPagina,
+      temAmeacas: ameacas.length > 0
+    }
+  }, [
+    paginaAtual,
+    debouncedBusca,
+    filtroSeveridade,
+    filtroKev,
+    filtroPrimitiva,
+    filtroCluster,
+    itensPorPagina,
+    ameacas.length
+  ])
+
   // ---------------------------------------------------------------------------
   // EFEITO 3: Carga em Background de Telemetria e Overview Consolidado (Single Round-Trip)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true
+
+    const aplicarOverviewConsolidado = (data) => {
+      setApiStatus('ONLINE')
+      setDbConectado(true)
+      setSincronizandoNuvem(false)
+
+      const novoPayload = {
+        stats: data.stats || null,
+        topTecnologias: data.topTecnologias || []
+      }
+      setAnalyticsData(novoPayload)
+
+      if (Array.isArray(data.chains) && data.chains.length > 0) {
+        setExploitChains(data.chains)
+        setSelectedChainId((prev) => prev || data.chains[0].chain_id)
+      }
+
+      if (data.clusters) {
+        setClustersData(data.clusters)
+      }
+
+      const ui = uiStateRef.current
+      const semFiltrosAtivos =
+        ui.paginaAtual === 1 &&
+        !ui.debouncedBusca &&
+        ui.filtroSeveridade === 'TODOS' &&
+        !ui.filtroKev &&
+        ui.filtroPrimitiva === 'TODOS' &&
+        ui.filtroCluster === 'TODOS'
+
+      if (data.initialThreats?.dados && semFiltrosAtivos && ui.itensPorPagina === 25) {
+        setAmeacas(data.initialThreats.dados)
+        setTotalRegistros(Number(data.initialThreats.total) || 0)
+        setTotalPaginas(Math.max(1, Number(data.initialThreats.totalPaginas) || 1))
+      }
+
+      const horaFormatada = new Date().toLocaleTimeString('pt-BR')
+      setUltimaAtualizacao(horaFormatada)
+
+      try {
+        localStorage.setItem(CACHE_KEYS.overview, JSON.stringify(data))
+        localStorage.setItem(CACHE_KEYS.lastSync, horaFormatada)
+      } catch {
+        // ignore storage errors
+      }
+    }
 
     const carregarTelemetriaEOverview = async () => {
       let activeUrl = apiUrl
@@ -238,45 +353,10 @@ function App() {
           const overviewRes = await axios.get(`${activeUrl}/api/threats/overview`, { timeout: 25000 })
           if (overviewRes.data && overviewRes.data.status === 'OK') {
             if (!isMounted) return
-            const data = overviewRes.data
-
-            setApiStatus('ONLINE')
-            setDbConectado(true)
-            setSincronizandoNuvem(false)
-
-            const novoPayload = {
-              stats: data.stats || null,
-              topTecnologias: data.topTecnologias || []
-            }
-            setAnalyticsData(novoPayload)
-
-            if (Array.isArray(data.chains) && data.chains.length > 0) {
-              setExploitChains(data.chains)
-              setSelectedChainId((prev) => prev || data.chains[0].chain_id)
-            }
-
-            if (data.clusters) {
-              setClustersData(data.clusters)
-            }
-
-            if (data.initialThreats?.dados && paginaAtual === 1 && !debouncedBusca && filtroSeveridade === 'TODOS') {
-              setAmeacas(data.initialThreats.dados)
-              setTotalRegistros(Number(data.initialThreats.total) || 0)
-              setTotalPaginas(Math.max(1, Number(data.initialThreats.totalPaginas) || 1))
-            }
-
-            const horaFormatada = new Date().toLocaleTimeString('pt-BR')
-            setUltimaAtualizacao(horaFormatada)
-
-            try {
-              localStorage.setItem('cti_overview_cache', JSON.stringify(data))
-              localStorage.setItem('cti_last_sync', horaFormatada)
-            } catch {
-              // ignore storage errors
-            }
+            aplicarOverviewConsolidado(overviewRes.data)
             return
           }
-        } catch (overviewErr) {
+        } catch {
           // Se falhar no localhost, tenta fallback para a URL de produção na nuvem
           if (activeUrl.includes('localhost')) {
             activeUrl = PROD_API_URL
@@ -285,29 +365,7 @@ function App() {
               const prodOverview = await axios.get(`${PROD_API_URL}/api/threats/overview`, { timeout: 25000 })
               if (prodOverview.data && prodOverview.data.status === 'OK') {
                 if (!isMounted) return
-                const data = prodOverview.data
-                setApiStatus('ONLINE')
-                setDbConectado(true)
-                setSincronizandoNuvem(false)
-                setAnalyticsData({ stats: data.stats || null, topTecnologias: data.topTecnologias || [] })
-                if (Array.isArray(data.chains) && data.chains.length > 0) {
-                  setExploitChains(data.chains)
-                  setSelectedChainId((prev) => prev || data.chains[0].chain_id)
-                }
-                if (data.clusters) setClustersData(data.clusters)
-                if (data.initialThreats?.dados && paginaAtual === 1 && !debouncedBusca && filtroSeveridade === 'TODOS') {
-                  setAmeacas(data.initialThreats.dados)
-                  setTotalRegistros(Number(data.initialThreats.total) || 0)
-                  setTotalPaginas(Math.max(1, Number(data.initialThreats.totalPaginas) || 1))
-                }
-                const hora = new Date().toLocaleTimeString('pt-BR')
-                setUltimaAtualizacao(hora)
-                try {
-                  localStorage.setItem('cti_overview_cache', JSON.stringify(data))
-                  localStorage.setItem('cti_last_sync', hora)
-                } catch {
-                  // ignore
-                }
+                aplicarOverviewConsolidado(prodOverview.data)
                 return
               }
             } catch {
@@ -346,8 +404,8 @@ function App() {
           setUltimaAtualizacao(horaFormatada)
 
           try {
-            localStorage.setItem('cti_analytics_cache', JSON.stringify(novoPayload))
-            localStorage.setItem('cti_last_sync', horaFormatada)
+            localStorage.setItem(CACHE_KEYS.analytics, JSON.stringify(novoPayload))
+            localStorage.setItem(CACHE_KEYS.lastSync, horaFormatada)
           } catch {
             // ignore
           }
@@ -357,8 +415,8 @@ function App() {
 
         if (chainsRes.status === 'fulfilled' && Array.isArray(chainsRes.value.data)) {
           setExploitChains(chainsRes.value.data)
-          if (chainsRes.value.data.length > 0 && !selectedChainId) {
-            setSelectedChainId(chainsRes.value.data[0].chain_id)
+          if (chainsRes.value.data.length > 0) {
+            setSelectedChainId((prev) => prev || chainsRes.value.data[0].chain_id)
           }
         }
 
@@ -387,9 +445,17 @@ function App() {
     const controller = new AbortController()
 
     const carregarAmeacasPaginadas = async () => {
+      const semFiltrosAtivos =
+        paginaAtual === 1 &&
+        !debouncedBusca &&
+        filtroSeveridade === 'TODOS' &&
+        !filtroKev &&
+        filtroPrimitiva === 'TODOS' &&
+        filtroCluster === 'TODOS'
+
       // Se já temos a página 1 em memória via cache instantâneo e não há busca/filtro ativa,
       // não exibe spinner intrusivo
-      const temCacheValido = paginaAtual === 1 && !debouncedBusca && filtroSeveridade === 'TODOS' && ameacas.length > 0
+      const temCacheValido = semFiltrosAtivos && uiStateRef.current.temAmeacas
       if (!temCacheValido) {
         setCarregandoTabela(true)
       }
@@ -406,6 +472,18 @@ function App() {
 
         if (filtroSeveridade && filtroSeveridade !== 'TODOS') {
           params.severity = filtroSeveridade
+        }
+
+        if (filtroKev) {
+          params.kev = 'true'
+        }
+
+        if (filtroPrimitiva && filtroPrimitiva !== 'TODOS') {
+          params.primitive = filtroPrimitiva
+        }
+
+        if (filtroCluster && filtroCluster !== 'TODOS') {
+          params.cluster = filtroCluster
         }
 
         const res = await axios.get(`${apiUrl}/api/threats`, {
@@ -427,10 +505,10 @@ function App() {
           setTotalPaginas(paginasRecebidas)
 
           // Salva página padrão no cache do localStorage para acelerar recargas futuras
-          if (paginaAtual === 1 && !debouncedBusca && filtroSeveridade === 'TODOS') {
+          if (semFiltrosAtivos) {
             try {
-              localStorage.setItem('cti_threats_page1', JSON.stringify(listaRecebida))
-              localStorage.setItem('cti_total_registros', String(totalRecebido))
+              localStorage.setItem(CACHE_KEYS.threatsPage1, JSON.stringify(listaRecebida))
+              localStorage.setItem(CACHE_KEYS.totalRegistros, String(totalRecebido))
             } catch {
               // ignore
             }
@@ -454,7 +532,7 @@ function App() {
       isMounted = false
       controller.abort()
     }
-  }, [apiUrl, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade])
+  }, [apiUrl, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade, filtroKev, filtroPrimitiva, filtroCluster])
 
   // ---------------------------------------------------------------------------
   // AÇÕES DE NAVEGAÇÃO E EXPANSÃO ACCORDION
@@ -521,7 +599,7 @@ function App() {
         nome: 'Baixo',
         faixa: 'CVSS 0.1 - 3.9',
         valor: Number(s.baixas) || 0,
-        cor: 'var(--neon-green)'
+        cor: 'var(--low-blue)'
       }
     ]
   }, [analyticsData.stats])
@@ -890,6 +968,22 @@ function App() {
             >
               LOW <span className="pill-count">{analyticsData.stats ? Number(analyticsData.stats.baixas).toLocaleString('pt-BR') : ''}</span>
             </button>
+            <button
+              type="button"
+              className={`filter-pill pill-kev ${filtroKev ? 'active' : ''}`}
+              onClick={() => {
+                setFiltroKev((prev) => !prev)
+                setPaginaAtual(1)
+              }}
+              title="Filtrar vulnerabilidades exploradas ativamente no mundo real (Catálogo CISA KEV)"
+            >
+              CISA KEV
+              {analyticsData.stats?.cisa_kev_total !== undefined && (
+                <span className="pill-count">
+                  {Number(analyticsData.stats.cisa_kev_total).toLocaleString('pt-BR')}
+                </span>
+              )}
+            </button>
           </div>
 
           <div className="filter-stats-text">
@@ -902,6 +996,77 @@ function App() {
             )}
           </div>
         </div>
+
+        {(clustersData.primitivas?.length > 0 || clustersData.clusters?.length > 0) && (
+          <div className="ml-clusters-bar">
+            {clustersData.primitivas?.length > 0 && (
+              <div className="ml-clusters-row">
+                <span className="ml-clusters-label">KILL CHAIN:</span>
+                <div className="ml-clusters-group">
+                  {clustersData.primitivas.slice(0, 6).map((item) => {
+                    const ativo = filtroPrimitiva === item.primitiva
+                    return (
+                      <button
+                        key={item.primitiva}
+                        type="button"
+                        className={`cluster-chip chip-primitive ${ativo ? 'active' : ''}`}
+                        onClick={() => {
+                          setFiltroPrimitiva(ativo ? 'TODOS' : item.primitiva)
+                          setPaginaAtual(1)
+                        }}
+                      >
+                        <span>{item.primitiva}</span>
+                        <span className="cluster-chip-count">({Number(item.total).toLocaleString('pt-BR')})</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {clustersData.clusters?.length > 0 && (
+              <div className="ml-clusters-row">
+                <span className="ml-clusters-label">ML CLUSTERS:</span>
+                <div className="ml-clusters-group">
+                  {clustersData.clusters.slice(0, 6).map((c) => {
+                    const ativo = filtroCluster === c.cluster_label
+                    return (
+                      <button
+                        key={c.cluster_label}
+                        type="button"
+                        className={`cluster-chip ${ativo ? 'active' : ''}`}
+                        onClick={() => {
+                          setFiltroCluster(ativo ? 'TODOS' : c.cluster_label)
+                          setPaginaAtual(1)
+                        }}
+                      >
+                        <span>{c.cluster_label}</span>
+                        <span className="cluster-chip-count">({Number(c.total).toLocaleString('pt-BR')})</span>
+                      </button>
+                    )
+                  })}
+
+                  {(filtroKev || filtroPrimitiva !== 'TODOS' || filtroCluster !== 'TODOS' || filtroSeveridade !== 'TODOS' || termoBusca) && (
+                    <button
+                      type="button"
+                      className="btn-reset-ml-filters"
+                      onClick={() => {
+                        setTermoBusca('')
+                        setFiltroSeveridade('TODOS')
+                        setFiltroKev(false)
+                        setFiltroPrimitiva('TODOS')
+                        setFiltroCluster('TODOS')
+                        setPaginaAtual(1)
+                      }}
+                    >
+                      ✕ Limpar Filtros
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {/* --------------------------------------------------------------------
@@ -964,7 +1129,7 @@ function App() {
                 <th>SCORE CVSS</th>
                 <th>SEVERIDADE</th>
                 <th>DESCRIÇÃO TÉCNICA</th>
-                <th>DATA INGESTÃO</th>
+                <th>PUBLICAÇÃO NIST</th>
               </tr>
             </thead>
             <tbody>
@@ -1022,8 +1187,27 @@ function App() {
                         <div className="cve-desc-body">
                           {item.descricao}
                         </div>
-                        {((item.primitiva && item.primitiva !== 'GENERIC_VULN') || (item.cluster_label && item.cluster_label !== 'Geral / Não Clusterizado')) && (
+                        {(
+                          item.cisa_kev ||
+                          (item.cwe && item.cwe !== 'NVD-CWE-noinfo' && item.cwe !== 'NVD-CWE-Other') ||
+                          (item.primitiva && item.primitiva !== 'GENERIC_VULN') ||
+                          (item.cluster_label && item.cluster_label !== 'Geral / Não Clusterizado') ||
+                          (item.tecnologia && item.tecnologia !== 'Desconhecido / Geral')
+                        ) && (
                           <div className="cve-ml-tags">
+                            {item.cisa_kev && (
+                              <span
+                                className="cve-kev-tag"
+                                title="Confirmada no catálogo CISA Known Exploited Vulnerabilities (Explorada Ativamente)"
+                              >
+                                CISA KEV
+                              </span>
+                            )}
+                            {item.cwe && item.cwe !== 'NVD-CWE-noinfo' && item.cwe !== 'NVD-CWE-Other' && (
+                              <span className="cve-cwe-tag">
+                                {item.cwe}
+                              </span>
+                            )}
                             {item.primitiva && item.primitiva !== 'GENERIC_VULN' && (
                               <span className={`cve-primitive-tag primitive-${String(item.primitiva).toLowerCase()}`}>
                                 {item.primitiva}
