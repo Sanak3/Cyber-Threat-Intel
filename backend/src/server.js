@@ -324,10 +324,13 @@ async function obterAnalytics() {
     return responsePayload;
 }
 
+const MAX_CHAINS_CACHE = 100;
+
 async function obterChains(limit = 50) {
+    const limiteSeguro = Math.max(1, Math.min(Number(limit) || 50, MAX_CHAINS_CACHE));
     const agora = Date.now();
     if (memoryCache.chains.data && agora < memoryCache.chains.expiresAt) {
-        return memoryCache.chains.data;
+        return memoryCache.chains.data.slice(0, limiteSeguro);
     }
 
     let chainsRetornadas = [];
@@ -338,7 +341,7 @@ async function obterChains(limit = 50) {
             ORDER BY score_cvss DESC, data_criacao DESC
             LIMIT $1;
         `;
-        const { rows } = await pool.query(query, [limit]);
+        const { rows } = await pool.query(query, [MAX_CHAINS_CACHE]);
         if (rows && rows.length > 0) {
             chainsRetornadas = rows;
         }
@@ -351,7 +354,7 @@ async function obterChains(limit = 50) {
     }
 
     memoryCache.chains = { data: chainsRetornadas, expiresAt: agora + CACHE_TTL_MS };
-    return chainsRetornadas;
+    return chainsRetornadas.slice(0, limiteSeguro);
 }
 
 async function obterClusters() {
@@ -445,10 +448,10 @@ app.get('/api/health', (req, res) => {
 function compararSegredoSeguro(recebido, esperado) {
     if (typeof recebido !== 'string' || typeof esperado !== 'string') return false;
     if (!recebido.length || !esperado.length) return false;
-    const bufRecebido = Buffer.from(recebido, 'utf8');
-    const bufEsperado = Buffer.from(esperado, 'utf8');
-    if (bufRecebido.length !== bufEsperado.length) return false;
-    return crypto.timingSafeEqual(bufRecebido, bufEsperado);
+    // Compara digests SHA-256 de tamanho fixo (32 bytes) para evitar vazamento do tamanho do segredo por timing
+    const hashRecebido = crypto.createHash('sha256').update(recebido, 'utf8').digest();
+    const hashEsperado = crypto.createHash('sha256').update(esperado, 'utf8').digest();
+    return crypto.timingSafeEqual(hashRecebido, hashEsperado);
 }
 
 // Endpoint Interno: Invalidação de Cache disparada por Webhook Seguro (ETL Pipeline)
@@ -737,7 +740,7 @@ async function preAquecerCache() {
     try {
         console.log('[+] [Cache Engine] Pré-aquecendo cache em RAM no boot do servidor...');
         const t0 = Date.now();
-        await Promise.all([
+        const [analytics, chains, clusters, initialThreats] = await Promise.all([
             obterAnalytics(),
             obterChains(50),
             obterClusters(),
@@ -745,15 +748,14 @@ async function preAquecerCache() {
             obterDefaultThreats(10)
         ]);
 
-        const analytics = memoryCache.analytics.data;
         memoryCache.overview = {
             data: {
                 status: 'OK',
                 stats: analytics ? analytics.stats : null,
                 topTecnologias: analytics ? analytics.topTecnologias : [],
-                chains: memoryCache.chains.data,
-                clusters: memoryCache.clusters.data,
-                initialThreats: memoryCache.defaultThreats[25] ? memoryCache.defaultThreats[25].data : null
+                chains,
+                clusters,
+                initialThreats
             },
             expiresAt: Date.now() + CACHE_TTL_MS
         };

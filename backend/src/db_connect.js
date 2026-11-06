@@ -1,6 +1,7 @@
 const { Pool } = require('pg');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 // Configuração do pool de conexão com suporte a SSL seguro para AWS RDS
 // Se DB_SSL_CA estiver definido, valida estritamente a cadeia de certificados;
