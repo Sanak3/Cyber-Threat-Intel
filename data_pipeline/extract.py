@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime, timezone, timedelta
 import requests
 from dotenv import load_dotenv
 
@@ -8,9 +9,12 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 load_dotenv()
 
 
-def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000):
+def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_recentes=True, janela_dias=None):
     """
     Extrai vulnerabilidades (CVEs) da API v2.0 do NIST NVD utilizando:
+    - Descoberta inteligente do final do catálogo (totalResults - total_desejado) ou filtro
+      de janela temporal (lastModStartDate / lastModEndDate de até 90-120 dias) para extrair
+      as CVEs mais recentes em vez de registros legados de 1999.
     - Sessão persistente (requests.Session) para reaproveitamento de conexões e handshake TLS/SSL.
     - User-Agent customizado para identificação clara no tráfego HTTP.
     - Paginação inteligente até atingir o total desejado de registros.
@@ -18,6 +22,8 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000):
 
     :param total_desejado: Número total de registros a serem coletados (padrão: 10.000).
     :param max_por_pagina: Limite máximo de registros por requisição da API (máximo NIST: 2.000).
+    :param buscar_mais_recentes: Se True, inicia a busca pelas CVEs mais recentes do catálogo.
+    :param janela_dias: Se informado (ex: 90), usa filtro de data no formato ISO da NIST v2.0 (máx 120 dias).
     :return: Dicionário contendo a lista consolidada de vulnerabilidades ou None em caso de falha.
     """
     print(f"[+] [ETL Extract] Iniciando extração escalável do NIST NVD (Alvo: {total_desejado:,} CVEs)...")
@@ -40,19 +46,50 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000):
     base_url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     todas_vulnerabilidades = []
     start_index = 0
-    total_lotes = (total_desejado + max_por_pagina - 1) // max_por_pagina
 
     # Inicializa sessão persistente com pooling de conexões
     session = requests.Session()
     session.headers.update(custom_headers)
 
+    # Parâmetros de data para sincronização incremental (respeitando limite de 120 dias da API v2.0)
+    date_params = ""
+    if janela_dias:
+        dias_validos = max(1, min(int(janela_dias), 120))
+        agora = datetime.now(timezone.utc)
+        inicio_janela = agora - timedelta(days=dias_validos)
+        
+        # Formato canônico NIST v2.0: YYYY-MM-DDTHH:mm:ss.000
+        start_str = inicio_janela.strftime("%Y-%m-%dT%H:%M:%S.000")
+        end_str = agora.strftime("%Y-%m-%dT%H:%M:%S.000")
+        date_params = f"&lastModStartDate={start_str}&lastModEndDate={end_str}"
+        print(f"[+] [ETL Extract] Filtro incremental ativado: janela de {dias_validos} dias ({start_str} até {end_str}).")
+
     try:
+        # Se buscar_mais_recentes estiver ativo e sem filtro de janela de datas,
+        # calcula startIndex a partir do totalResults global da API do NIST
+        if buscar_mais_recentes and not date_params:
+            try:
+                print("[*] [ETL Extract] Consultando metadados do catálogo global para calcular offset das vulnerabilidades mais recentes...")
+                discovery_res = session.get(f"{base_url}?resultsPerPage=1", timeout=30)
+                if discovery_res.status_code == 200:
+                    total_global = discovery_res.json().get("totalResults", 0)
+                    if total_global > total_desejado:
+                        start_index = total_global - total_desejado
+                        print(f"[+] [ETL Extract] Catálogo possui {total_global:,} CVEs. Iniciando no offset {start_index:,} para baixar os {total_desejado:,} registros mais recentes.")
+                    else:
+                        print(f"[*] [ETL Extract] Catálogo possui {total_global:,} registros. Iniciando de startIndex=0.")
+            except Exception as e_disc:
+                print(f"[!] [ETL Extract] Aviso na descoberta de offset recente ({e_disc}). Iniciando em startIndex=0.")
+                start_index = 0
+
+        total_lotes = (total_desejado + max_por_pagina - 1) // max_por_pagina
+
         while len(todas_vulnerabilidades) < total_desejado:
-            lote_atual = (start_index // max_por_pagina) + 1
+            lote_atual = (len(todas_vulnerabilidades) // max_por_pagina) + 1
             registros_restantes = total_desejado - len(todas_vulnerabilidades)
             results_per_page = min(max_por_pagina, registros_restantes)
 
-            url = f"{base_url}?resultsPerPage={results_per_page}&startIndex={start_index}"
+            url = f"{base_url}?resultsPerPage={results_per_page}&startIndex={start_index}{date_params}"
             print(f"\n[*] [ETL Extract] Baixando lote {lote_atual}/{total_lotes} (startIndex={start_index:,} | solicitando {results_per_page} registros)...")
 
             sucesso_lote = False
