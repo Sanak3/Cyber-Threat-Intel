@@ -7,14 +7,20 @@ env/
 .env
 .env.local
 
-# Arquivos de sistema do Mac e PyCharm
+# Arquivos de sistema do Mac e IDEs
 .DS_Store
 .idea/
+*.iml
 __pycache__/
+*.pyc
 
-#json
-*.jsongit
-*.json
+# Arquivos temporários e dumps de dados JSON
+data_pipeline/*.json
+debug_dados_api.json
+*.jsonl
 
-# Dependências do Node
+# Dependências do Node e Builds
 backend/node_modules/
+frontend/node_modules/
+dist/
+build/
