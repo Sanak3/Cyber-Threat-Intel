@@ -216,10 +216,11 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
             page_size=batch_size
         )
 
-        # Gravação das Exploit Chains detectadas
+        # Gravação das Exploit Chains detectadas (substitui cadeias antigas para evitar IDs órfãos em cargas parciais)
         if writeups:
             import json
             print(f"[+] [ETL Load] Gravando {len(writeups)} Exploit Chains e Writeup Blueprints na tabela exploit_chains...")
+            cursor.execute("DELETE FROM exploit_chains;")
             chains_tuplas = [
                 (
                     w["chain_id"],

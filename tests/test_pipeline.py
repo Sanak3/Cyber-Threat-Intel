@@ -13,10 +13,12 @@ from ml_engine.primitives import (
     AttackPrimitive,
     extrair_primitiva,
     extrair_tecnologia,
+    extrair_subproduto,
     enriquecer_vulnerabilidades
 )
 from ml_engine.chain_detector import ExploitChainDetector
 from ml_engine.clusterizer import CVEClusterizer
+from ml_engine.writeup_builder import WriteupBuilder
 
 
 class TestThreatPipeline(unittest.TestCase):
@@ -233,6 +235,96 @@ class TestThreatPipeline(unittest.TestCase):
         self.assertIsNotNone(resultado)
         self.assertEqual(len(resultado["vulnerabilities"]), 2)
         self.assertEqual(mock_session.get.call_count, 1)
+
+    def test_chain_detector_isola_subprodutos_e_prioriza_kev(self):
+        # Jenkins e Kubernetes pertencem a "GitLab / DevOps", mas não devem formar cadeia espúria sem CPE
+        vulns = [
+            {
+                "id_cve": "CVE-2026-2001",
+                "descricao": "Information disclosure in Jenkins allows reading sensitive files",
+                "nota_cvss": 6.5,
+                "severidade": "MEDIUM",
+                "cwe": "CWE-200",
+                "cisa_kev": False,
+            },
+            {
+                "id_cve": "CVE-2026-2002",
+                "descricao": "Remote code execution in Kubernetes cluster controller",
+                "nota_cvss": 9.8,
+                "severidade": "CRITICAL",
+                "cwe": "CWE-94",
+                "cisa_kev": False,
+            },
+            {
+                "id_cve": "CVE-2026-2003",
+                "descricao": "Authentication bypass in Ivanti Connect Secure gateway",
+                "nota_cvss": 8.2,
+                "severidade": "HIGH",
+                "cwe": "CWE-287",
+                "cpe_vendor": "ivanti",
+                "cpe_product": "connect_secure",
+                "cisa_kev": True,
+            },
+            {
+                "id_cve": "CVE-2026-2004",
+                "descricao": "Command injection in Ivanti Connect Secure admin interface",
+                "nota_cvss": 9.1,
+                "severidade": "CRITICAL",
+                "cwe": "CWE-78",
+                "cpe_vendor": "ivanti",
+                "cpe_product": "connect_secure",
+                "cisa_kev": True,
+            },
+            {
+                "id_cve": "CVE-2026-2005",
+                "descricao": "Information disclosure in Apache Tomcat servlet",
+                "nota_cvss": 5.3,
+                "severidade": "MEDIUM",
+                "cwe": "CWE-200",
+                "cpe_vendor": "apache",
+                "cpe_product": "tomcat",
+                "cisa_kev": False,
+            },
+            {
+                "id_cve": "CVE-2026-2006",
+                "descricao": "Remote code execution in Apache Tomcat",
+                "nota_cvss": 9.8,
+                "severidade": "CRITICAL",
+                "cwe": "CWE-502",
+                "cpe_vendor": "apache",
+                "cpe_product": "tomcat",
+                "cisa_kev": False,
+            },
+        ]
+        self.assertEqual(extrair_subproduto(vulns[0]["descricao"]), "jenkins")
+        self.assertEqual(extrair_subproduto(vulns[1]["descricao"]), "kubernetes")
+
+        df = enriquecer_vulnerabilidades(vulns)
+        detector = ExploitChainDetector()
+        detector.construir_grafo(df)
+        chains = detector.detectar_chains(max_chains=10)
+
+        # Nenhuma cadeia deve ligar Jenkins (CVE-2026-2001) a Kubernetes (CVE-2026-2002)
+        for c in chains:
+            self.assertNotEqual(c["cves"], ["CVE-2026-2001", "CVE-2026-2002"])
+
+        # A cadeia com CISA KEV (Ivanti) deve ser priorizada em CHAIN-0001
+        self.assertEqual(len(chains), 2)
+        self.assertEqual(chains[0]["chain_id"], "CHAIN-0001")
+        self.assertEqual(chains[0]["tecnologia"], "Ivanti / Pulse Secure")
+        self.assertTrue(chains[0]["tem_kev"])
+        self.assertEqual(chains[0]["kev_count"], 2)
+
+        # Score composto sem KEV (5.3 -> 9.8) não satura artificialmente em 10.0
+        self.assertLess(chains[1]["score_combinado"], 10.0)
+
+        # WriteupBuilder propaga metadados KEV, CWE e mitigações contextuais
+        writeup_kev = WriteupBuilder.construir_writeup(chains[0])
+        self.assertTrue(writeup_kev["tem_kev"])
+        self.assertIn("[CISA KEV]", writeup_kev["titulo"])
+        self.assertEqual(writeup_kev["passos_ataque"][0]["cwe"], "CWE-287")
+        self.assertTrue(writeup_kev["passos_ataque"][0]["cisa_kev"])
+        self.assertTrue(any("CISA KEV" in m for m in writeup_kev["mitigacoes_recomendadas"]))
 
 
 if __name__ == "__main__":
