@@ -59,19 +59,67 @@ PRIMITIVE_PATTERNS = {
 
 # Padrões de tecnologias e ecossistemas conhecidos
 TECH_PATTERNS = {
-    "Microsoft / Windows": [r"\b(windows|microsoft|exchange|active directory|iis|azure|sharepoint)\b"],
+    "Microsoft / Windows": [r"\b(windows|microsoft|exchange|active directory|iis|azure|sharepoint|outlook)\b"],
     "Linux / Kernel": [r"\b(linux|kernel|ubuntu|debian|red hat|rhel|centos|alpine)\b"],
-    "Apache Foundation": [r"\b(apache|tomcat|struts|kafka|hadoop|activemq)\b"],
+    "Apache Foundation": [r"\b(apache|tomcat|struts|kafka|hadoop|activemq|airflow|superset|ofbiz)\b"],
     "Cisco Systems": [r"\b(cisco|ios[- ]xe|asa|anyconnect|catalyst)\b"],
     "Apple": [r"\b(apple|macos|ios|ipados|safari|webkit)\b"],
     "Google / Android": [r"\b(google|android|chrome|chromium)\b"],
-    "Oracle": [r"\b(oracle|weblogic|java|mysql|peoplesoft)\b"],
+    "Oracle": [r"\b(oracle|weblogic|java|mysql|peoplesoft|virtualbox)\b"],
     "WordPress": [r"\b(wordpress|wp[- ]plugin|wp[- ]theme)\b"],
     "GitLab / DevOps": [r"\b(gitlab|github|jenkins|docker|kubernetes|containerd)\b"],
     "VMware": [r"\b(vmware|esxi|vcenter|vsphere)\b"],
     "PHP Ecosystem": [r"\b(php|laravel|symfony)\b"],
     "OpenSSL / Crypto": [r"\b(openssl|gnutls|libssl)\b"],
-    "Fortinet / SonicWall": [r"\b(fortinet|fortios|fortigate|sonicwall)\b"]
+    "Fortinet / SonicWall": [r"\b(fortinet|fortios|fortigate|fortimanager|sonicwall)\b"],
+    "Ivanti / Pulse Secure": [r"\b(ivanti|pulse connect secure|connect secure|endpoint manager)\b"],
+    "Palo Alto / Juniper": [r"\b(palo alto|pan[- ]os|globalprotect|juniper|junos)\b"],
+    "Citrix / NetScaler": [r"\b(citrix|netscaler)\b"],
+    "Atlassian": [r"\b(atlassian|confluence|jira|bitbucket|bamboo)\b"],
+    "Nginx / F5": [r"\b(f5|big[- ]ip|nginx)\b"]
+}
+
+# Padrões de subprodutos específicos para evitar encadeamento espúrio entre softwares distintos do mesmo ecossistema
+SUBPRODUCT_PATTERNS = {
+    "gitlab": r"\bgitlab\b",
+    "github": r"\bgithub\b",
+    "jenkins": r"\bjenkins\b",
+    "docker": r"\bdocker\b",
+    "kubernetes": r"\b(kubernetes|k8s)\b",
+    "containerd": r"\b(containerd|runc)\b",
+    "tomcat": r"\btomcat\b",
+    "struts": r"\bstruts\b",
+    "kafka": r"\bkafka\b",
+    "hadoop": r"\bhadoop\b",
+    "activemq": r"\bactivemq\b",
+    "airflow": r"\bairflow\b",
+    "superset": r"\bsuperset\b",
+    "ofbiz": r"\bofbiz\b",
+    "http_server": r"\b(apache http server|httpd)\b",
+    "android": r"\bandroid\b",
+    "chrome": r"\b(chrome|chromium)\b",
+    "weblogic": r"\bweblogic\b",
+    "mysql": r"\bmysql\b",
+    "peoplesoft": r"\bpeoplesoft\b",
+    "virtualbox": r"\bvirtualbox\b",
+    "exchange_server": r"\b(exchange server|microsoft exchange)\b",
+    "sharepoint": r"\bsharepoint\b",
+    "iis": r"\b(internet information services|\biis\b)\b",
+    "outlook": r"\boutlook\b",
+    "windows": r"\b(windows kernel|windows server|windows 10|windows 11|win32k)\b",
+    "macos": r"\bmacos\b",
+    "ios": r"\b(ipados|\bios\b)\b",
+    "safari": r"\b(safari|webkit)\b",
+    "fortios": r"\b(fortinet|fortios|fortigate|fortimanager)\b",
+    "sonicwall": r"\bsonicwall\b",
+    "pan_os": r"\b(palo alto|pan[- ]os|globalprotect)\b",
+    "junos": r"\b(juniper|junos)\b",
+    "big_ip": r"\b(f5|big[- ]ip)\b",
+    "nginx": r"\bnginx\b",
+    "confluence": r"\bconfluence\b",
+    "jira": r"\bjira\b",
+    "bitbucket": r"\bbitbucket\b",
+    "linux_kernel": r"\b(linux kernel|nf_tables|netfilter)\b"
 }
 
 # Mapeamento determinístico de CWEs para Primitivas de Ataque da Cyber Kill Chain
@@ -136,11 +184,21 @@ CPE_VENDOR_MAP = {
     "github": "GitLab / DevOps",
     "docker": "GitLab / DevOps",
     "jenkins": "GitLab / DevOps",
+    "kubernetes": "GitLab / DevOps",
     "vmware": "VMware",
+    "broadcom": "VMware",
     "php": "PHP Ecosystem",
     "openssl": "OpenSSL / Crypto",
     "fortinet": "Fortinet / SonicWall",
-    "sonicwall": "Fortinet / SonicWall"
+    "sonicwall": "Fortinet / SonicWall",
+    "ivanti": "Ivanti / Pulse Secure",
+    "pulsesecure": "Ivanti / Pulse Secure",
+    "paloaltonetworks": "Palo Alto / Juniper",
+    "juniper": "Palo Alto / Juniper",
+    "citrix": "Citrix / NetScaler",
+    "atlassian": "Atlassian",
+    "f5": "Nginx / F5",
+    "nginx": "Nginx / F5"
 }
 
 
@@ -194,33 +252,59 @@ def extrair_primitiva(descricao: str, cwe: str = None) -> Dict[str, Any]:
     }
 
 
+def extrair_subproduto(descricao: str, cpe_product: str = None) -> str:
+    """
+    Extrai o identificador normalizado do subproduto afetado via CPE 2.3
+    ou heurística textual quando o CPE ainda não foi catalogado pelo NIST.
+    """
+    if cpe_product:
+        prod_clean = str(cpe_product).lower().strip()
+        if prod_clean and prod_clean not in {"*", "-", "n/a"}:
+            return prod_clean
+
+    if not descricao or not isinstance(descricao, str):
+        return ""
+
+    texto_lower = descricao.lower()
+    for subprod_id, pattern in SUBPRODUCT_PATTERNS.items():
+        if re.search(pattern, texto_lower):
+            return subprod_id
+
+    return ""
+
+
 def extrair_tecnologia(descricao: str, cpe_vendor: str = None, cpe_product: str = None) -> str:
     """
     Identifica o ecossistema ou fabricante afetado a partir do CPE estruturado
     ou heurística de descrição técnica.
     """
+    vendor_clean = str(cpe_vendor).lower().strip() if cpe_vendor else ""
+
     # 1. Resolução via CPE estruturado (Configurations do NIST)
-    if cpe_vendor:
-        vendor_clean = str(cpe_vendor).lower().strip()
-        if vendor_clean in CPE_VENDOR_MAP:
-            return CPE_VENDOR_MAP[vendor_clean]
+    if vendor_clean in CPE_VENDOR_MAP:
+        return CPE_VENDOR_MAP[vendor_clean]
+
+    if descricao and isinstance(descricao, str):
+        texto_lower = descricao.lower()
+
+        # 2. Regex nos padrões de ecossistemas conhecidos
+        for tech_nome, patterns in TECH_PATTERNS.items():
+            for pattern in patterns:
+                if re.search(pattern, texto_lower):
+                    return tech_nome
+
+    # 3. Aproveita o fabricante estruturado do CPE para alvos corporativos fora do mapa fixo (ex.: Zyxel, Sophos, Veeam)
+    if vendor_clean and len(vendor_clean) > 2 and vendor_clean not in {"*", "-", "n/a", "unknown"}:
+        return vendor_clean.replace("_", " ").title()
 
     if not descricao or not isinstance(descricao, str):
         return "Desconhecido / Geral"
 
-    texto_lower = descricao.lower()
-
-    # 2. Regex nos padrões de ecossistemas conhecidos
-    for tech_nome, patterns in TECH_PATTERNS.items():
-        for pattern in patterns:
-            if re.search(pattern, texto_lower):
-                return tech_nome
-
-    # Fallback: Tenta identificar "in <Component> before <Version>"
+    # 4. Fallback: Tenta identificar "in <Component> before <Version>"
     match_component = re.search(r"\bin\s+([A-Za-z0-9_\-\.]+)\s+(?:before|through|version|prior)", descricao, re.IGNORECASE)
     if match_component:
         candidato = match_component.group(1).strip()
-        if len(candidato) > 2 and not candidato.lower() in ["the", "all", "any", "some"]:
+        if len(candidato) > 2 and candidato.lower() not in ["the", "all", "any", "some"]:
             return candidato
 
     return "Desconhecido / Geral"
@@ -228,8 +312,8 @@ def extrair_tecnologia(descricao: str, cpe_vendor: str = None, cpe_product: str 
 
 def enriquecer_vulnerabilidades(vulnerabilidades: List[Dict[str, Any]]) -> pd.DataFrame:
     """
-    Recebe a lista de vulnerabilidades, enriquece com Primitivas de Ataque
-    e Tecnologia afetada (utilizando dados estruturados CWE e CPE),
+    Recebe a lista de vulnerabilidades, enriquece com Primitivas de Ataque,
+    Tecnologia e Subproduto afetados (utilizando dados estruturados CWE e CPE),
     retornando um DataFrame do Pandas pronto para análise.
     """
     if not vulnerabilidades:
@@ -240,6 +324,7 @@ def enriquecer_vulnerabilidades(vulnerabilidades: List[Dict[str, Any]]) -> pd.Da
     primitivas = []
     estagios = []
     tecnologias = []
+    subprodutos = []
 
     for _, row in df.iterrows():
         desc = row.get("descricao", "")
@@ -249,13 +334,16 @@ def enriquecer_vulnerabilidades(vulnerabilidades: List[Dict[str, Any]]) -> pd.Da
 
         info_primitiva = extrair_primitiva(desc, cwe=cwe)
         tech = extrair_tecnologia(desc, cpe_vendor=cpe_vendor, cpe_product=cpe_product)
+        subprod = extrair_subproduto(desc, cpe_product=cpe_product)
 
         primitivas.append(info_primitiva["primitiva"])
         estagios.append(info_primitiva["estagio"])
         tecnologias.append(tech)
+        subprodutos.append(subprod)
 
     df["primitiva"] = primitivas
     df["estagio_kill_chain"] = estagios
     df["tecnologia"] = tecnologias
+    df["subproduto"] = subprodutos
 
     return df
