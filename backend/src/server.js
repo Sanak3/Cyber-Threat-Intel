@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -272,12 +273,13 @@ async function obterStats() {
     const query = `
         SELECT 
             COUNT(*) as total_ameacas,
-            SUM(CASE WHEN nota_cvss >= 9.0 THEN 1 ELSE 0 END) as criticas,
-            SUM(CASE WHEN nota_cvss >= 7.0 AND nota_cvss < 9.0 THEN 1 ELSE 0 END) as altas,
-            SUM(CASE WHEN nota_cvss >= 4.0 AND nota_cvss < 7.0 THEN 1 ELSE 0 END) as medias,
-            SUM(CASE WHEN nota_cvss > 0.0 AND nota_cvss < 4.0 THEN 1 ELSE 0 END) as baixas,
-            MAX(nota_cvss) as pior_risco,
-            ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2) as media_score
+            COALESCE(SUM(CASE WHEN nota_cvss >= 9.0 THEN 1 ELSE 0 END), 0) as criticas,
+            COALESCE(SUM(CASE WHEN nota_cvss >= 7.0 AND nota_cvss < 9.0 THEN 1 ELSE 0 END), 0) as altas,
+            COALESCE(SUM(CASE WHEN nota_cvss >= 4.0 AND nota_cvss < 7.0 THEN 1 ELSE 0 END), 0) as medias,
+            COALESCE(SUM(CASE WHEN nota_cvss > 0.0 AND nota_cvss < 4.0 THEN 1 ELSE 0 END), 0) as baixas,
+            COALESCE(SUM(CASE WHEN cisa_kev = TRUE THEN 1 ELSE 0 END), 0) as cisa_kev_total,
+            COALESCE(MAX(nota_cvss), 0) as pior_risco,
+            COALESCE(ROUND(AVG(CASE WHEN nota_cvss > 0 THEN nota_cvss ELSE NULL END)::numeric, 2), 0) as media_score
         FROM threats;
     `;
     const { rows } = await pool.query(query);
@@ -440,18 +442,36 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Cyber Threat API rodando com sucesso!' });
 });
 
+function compararSegredoSeguro(recebido, esperado) {
+    if (typeof recebido !== 'string' || typeof esperado !== 'string') return false;
+    if (!recebido.length || !esperado.length) return false;
+    const bufRecebido = Buffer.from(recebido, 'utf8');
+    const bufEsperado = Buffer.from(esperado, 'utf8');
+    if (bufRecebido.length !== bufEsperado.length) return false;
+    return crypto.timingSafeEqual(bufRecebido, bufEsperado);
+}
+
 // Endpoint Interno: Invalidação de Cache disparada por Webhook Seguro (ETL Pipeline)
 app.post('/api/internal/cache-flush', (req, res) => {
     const configuredSecret = process.env.INTERNAL_WEBHOOK_SECRET;
-    const incomingSecret = req.headers['x-webhook-secret'] || (req.headers.authorization && req.headers.authorization.replace('Bearer ', ''));
+    const rawHeaderSecret = Array.isArray(req.headers['x-webhook-secret'])
+        ? req.headers['x-webhook-secret'][0]
+        : req.headers['x-webhook-secret'];
+    const bearerSecret = typeof req.headers.authorization === 'string' && req.headers.authorization.startsWith('Bearer ')
+        ? req.headers.authorization.slice(7)
+        : null;
+    const incomingSecret = rawHeaderSecret || bearerSecret;
 
-    if (!configuredSecret || incomingSecret !== configuredSecret) {
+    if (!compararSegredoSeguro(incomingSecret, configuredSecret)) {
         return res.status(401).json({ error: 'Acesso não autorizado: segredo do webhook inválido ou não configurado.' });
     }
 
     limparCache();
     console.log('[+] [Cache Engine] Cache em RAM invalidado com sucesso via Webhook Interno.');
-    res.json({ status: 'OK', message: 'Cache em RAM invalidado com sucesso.' });
+    preAquecerCache().catch((err) => {
+        console.warn('[!] [Cache Engine] Falha ao reaquecer cache após flush:', err.message);
+    });
+    res.json({ status: 'OK', message: 'Cache em RAM invalidado e reaquecimento disparado com sucesso.' });
 });
 
 // Rota Consolidada de Alta Performance (Single Round-Trip Bootstrap)
@@ -589,13 +609,26 @@ app.get('/api/threats', async (req, res) => {
             : null;
         const severity = inputSeverity && SEVERIDADES_VALIDAS.has(inputSeverity) ? inputSeverity : null;
 
-        const inputPrimitive = req.query.primitive 
+        const inputPrimitive = req.query.primitive && req.query.primitive !== 'TODOS'
             ? String(req.query.primitive).toUpperCase().trim() 
             : null;
         const primitive = inputPrimitive && PRIMITIVAS_VALIDAS.has(inputPrimitive) ? inputPrimitive : null;
 
+        const kevOnly = req.query.kev === 'true' || req.query.kev === '1';
+        const cluster = req.query.cluster && req.query.cluster !== 'TODOS'
+            ? String(req.query.cluster).slice(0, 150).replace(/\0/g, '').trim()
+            : null;
+
         // Otimização de Performance: Se for a página inicial padrão sem filtros, serve direto do cache em RAM
-        if (page === 1 && !rawSearch && !severity && !primitive && (limit === 25 || limit === 10 || limit === 50)) {
+        if (
+            page === 1 &&
+            !rawSearch &&
+            !severity &&
+            !primitive &&
+            !kevOnly &&
+            !cluster &&
+            (limit === 25 || limit === 10 || limit === 50)
+        ) {
             const cachedResult = await obterDefaultThreats(limit);
             res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
             return res.json(cachedResult);
@@ -617,10 +650,11 @@ app.get('/api/threats', async (req, res) => {
 
             // Busca otimizada: FTS utiliza o índice GIN (idx_threats_fts) sem o OR descricao ILIKE que forçava Seq Scan
             whereClauses.push(`(
-                cve_id ILIKE '%' || $${pLike} || '%'
+                cve_id ILIKE '%' || $${pLike} || '%' ESCAPE '\\'
                 OR to_tsvector('english', coalesce(descricao, '')) @@ plainto_tsquery('english', $${pFts})
-                OR tecnologia ILIKE '%' || $${pLike} || '%'
-                OR cluster_label ILIKE '%' || $${pLike} || '%'
+                OR tecnologia ILIKE '%' || $${pLike} || '%' ESCAPE '\\'
+                OR cluster_label ILIKE '%' || $${pLike} || '%' ESCAPE '\\'
+                OR cwe ILIKE '%' || $${pLike} || '%' ESCAPE '\\'
             )`);
         }
 
@@ -632,6 +666,15 @@ app.get('/api/threats', async (req, res) => {
         if (primitive) {
             queryParams.push(primitive);
             whereClauses.push(`primitiva = $${queryParams.length}`);
+        }
+
+        if (kevOnly) {
+            whereClauses.push('cisa_kev = TRUE');
+        }
+
+        if (cluster) {
+            queryParams.push(cluster);
+            whereClauses.push(`cluster_label = $${queryParams.length}`);
         }
 
         const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -720,7 +763,32 @@ async function preAquecerCache() {
     }
 }
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
     console.log(`[+] API do Cyber Threat Intel rodando na porta ${port} [Compression + RAM Cache + GIN FTS + ML Chains Ativos]`);
     preAquecerCache();
 });
+
+let encerrando = false;
+function encerrarServidorGraciosamente(sinal) {
+    if (encerrando) return;
+    encerrando = true;
+    console.log(`[!] Sinal ${sinal} recebido. Encerrando conexões HTTP e pool PostgreSQL...`);
+    server.close(async () => {
+        try {
+            await pool.end();
+            console.log('[+] Pool PostgreSQL encerrado com sucesso.');
+        } catch (err) {
+            console.error('[-] Erro ao encerrar pool PostgreSQL:', err.message);
+        } finally {
+            process.exit(0);
+        }
+    });
+
+    setTimeout(() => {
+        console.warn('[!] Tempo limite de shutdown atingido. Forçando encerramento.');
+        process.exit(1);
+    }, 10000).unref();
+}
+
+process.on('SIGTERM', () => encerrarServidorGraciosamente('SIGTERM'));
+process.on('SIGINT', () => encerrarServidorGraciosamente('SIGINT'));
