@@ -129,6 +129,10 @@ function App() {
     return 0
   })
   const [totalPaginas, setTotalPaginas] = useState(() => {
+    const limiteInicial = typeof window !== 'undefined' && window.innerWidth <= 768 ? 10 : 25
+    if (cachedOverview?.initialThreats?.total) {
+      return Math.max(1, Math.ceil(Number(cachedOverview.initialThreats.total) / limiteInicial))
+    }
     if (cachedOverview?.initialThreats?.totalPaginas) {
       return Number(cachedOverview.initialThreats.totalPaginas) || 1
     }
@@ -326,10 +330,11 @@ function App() {
         ui.filtroPrimitiva === 'TODOS' &&
         ui.filtroCluster === 'TODOS'
 
-      if (data.initialThreats?.dados && semFiltrosAtivos && ui.itensPorPagina === 25) {
-        setAmeacas(data.initialThreats.dados)
-        setTotalRegistros(Number(data.initialThreats.total) || 0)
-        setTotalPaginas(Math.max(1, Number(data.initialThreats.totalPaginas) || 1))
+      if (data.initialThreats?.dados && semFiltrosAtivos && (ui.itensPorPagina === 25 || ui.itensPorPagina === 10)) {
+        const total = Number(data.initialThreats.total) || 0
+        setAmeacas(data.initialThreats.dados.slice(0, ui.itensPorPagina))
+        setTotalRegistros(total)
+        setTotalPaginas(Math.max(1, Math.ceil(total / ui.itensPorPagina)))
       }
 
       const horaFormatada = new Date().toLocaleTimeString('pt-BR')
@@ -547,6 +552,15 @@ function App() {
 
   const irParaTopo = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const limparTodosFiltros = () => {
+    setTermoBusca('')
+    setFiltroSeveridade('TODOS')
+    setFiltroKev(false)
+    setFiltroPrimitiva('TODOS')
+    setFiltroCluster('TODOS')
+    setPaginaAtual(1)
   }
 
   const toggleExpandCve = (cveId) => {
@@ -802,7 +816,7 @@ function App() {
           <div className="analytics-card-header">
             <h3 className="analytics-card-title">
               <span className="section-title-prefix">&gt;_</span>
-              <span>DISTRIBUIÇÃO DE SEVERIDADE CVSS (v3.x / v2.0)</span>
+              <span>DISTRIBUIÇÃO DE SEVERIDADE CVSS (v4.0 / v3.x / v2.0)</span>
             </h3>
             <span className="analytics-badge">MATRIZ DE RISCO GLOBAL</span>
           </div>
@@ -997,7 +1011,7 @@ function App() {
           </div>
         </div>
 
-        {(clustersData.primitivas?.length > 0 || clustersData.clusters?.length > 0) && (
+        {(clustersData.primitivas?.length > 0 || clustersData.clusters?.length > 0 || filtroKev || filtroPrimitiva !== 'TODOS' || filtroCluster !== 'TODOS') && (
           <div className="ml-clusters-bar">
             {clustersData.primitivas?.length > 0 && (
               <div className="ml-clusters-row">
@@ -1020,11 +1034,21 @@ function App() {
                       </button>
                     )
                   })}
+
+                  {!(clustersData.clusters?.length > 0) && (filtroKev || filtroPrimitiva !== 'TODOS' || filtroCluster !== 'TODOS' || filtroSeveridade !== 'TODOS' || termoBusca) && (
+                    <button
+                      type="button"
+                      className="btn-reset-ml-filters"
+                      onClick={limparTodosFiltros}
+                    >
+                      ✕ Limpar Filtros
+                    </button>
+                  )}
                 </div>
               </div>
             )}
 
-            {clustersData.clusters?.length > 0 && (
+            {clustersData.clusters?.length > 0 ? (
               <div className="ml-clusters-row">
                 <span className="ml-clusters-label">ML CLUSTERS:</span>
                 <div className="ml-clusters-group">
@@ -1050,20 +1074,27 @@ function App() {
                     <button
                       type="button"
                       className="btn-reset-ml-filters"
-                      onClick={() => {
-                        setTermoBusca('')
-                        setFiltroSeveridade('TODOS')
-                        setFiltroKev(false)
-                        setFiltroPrimitiva('TODOS')
-                        setFiltroCluster('TODOS')
-                        setPaginaAtual(1)
-                      }}
+                      onClick={limparTodosFiltros}
                     >
                       ✕ Limpar Filtros
                     </button>
                   )}
                 </div>
               </div>
+            ) : (
+              !(clustersData.primitivas?.length > 0) && (filtroKev || filtroPrimitiva !== 'TODOS' || filtroCluster !== 'TODOS') && (
+                <div className="ml-clusters-row">
+                  <div className="ml-clusters-group">
+                    <button
+                      type="button"
+                      className="btn-reset-ml-filters"
+                      onClick={limparTodosFiltros}
+                    >
+                      ✕ Limpar Filtros
+                    </button>
+                  </div>
+                </div>
+              )
             )}
           </div>
         )}
