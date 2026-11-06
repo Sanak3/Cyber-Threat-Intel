@@ -8,6 +8,13 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pipeline-tests:
     name: Python ETL & ML Engine (Pytest)
@@ -32,7 +39,8 @@ jobs:
       - name: Validar Sintaxe e Executar Suite Pytest
         run: |
           python -m py_compile data_pipeline/extract.py data_pipeline/transform.py data_pipeline/upload_aws.py
-          python -m py_compile data_pipeline/ml_engine/primitives.py data_pipeline/ml_engine/clusterizer.py data_pipeline/ml_engine/chain_detector.py
+          python -m py_compile data_pipeline/ml_engine/primitives.py data_pipeline/ml_engine/clusterizer.py data_pipeline/ml_engine/chain_detector.py data_pipeline/ml_engine/writeup_builder.py
+          python -m py_compile tests/test_pipeline.py
           pytest tests/ -v
 
   backend-check:

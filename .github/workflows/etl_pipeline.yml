@@ -6,14 +6,20 @@ on:
     - cron: '0 6 * * *'
   # Permite disparar manualmente pela aba Actions do GitHub
   workflow_dispatch:
-  # Dispara automaticamente quando houver push com alterações no pipeline
+  # Dispara automaticamente apenas quando houver alterações reais no pipeline ETL
   push:
     branches:
       - main
     paths:
       - 'data_pipeline/**'
-      - 'tests/**'
-      - '.github/workflows/**'
+      - '.github/workflows/etl_pipeline.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nist-rds-etl-sync
+  cancel-in-progress: false
 
 jobs:
   run-etl:
@@ -28,6 +34,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'data_pipeline/requirements.txt'
 
       - name: Instalar Dependencias
         run: |
