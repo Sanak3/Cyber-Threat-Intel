@@ -5,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node -c src/server.js && node -c src/db_connect.js"
+    "check": "node -c src/server.js && node -c src/db_connect.js && node -c tests/server.test.js",
+    "test": "node --test tests/*.test.js"
   },
   "keywords": [],
   "author": "",

@@ -44,7 +44,7 @@ jobs:
           pytest tests/ -v
 
   backend-check:
-    name: Backend Express API (Syntax & Dependencies)
+    name: Backend Express API (Syntax & Node Tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -61,10 +61,11 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'backend/package-lock.json'
 
-      - name: Instalar Dependencias e Validar Modulos
+      - name: Instalar Dependencias, Validar Sintaxe e Executar Testes
         run: |
           npm ci
           npm run check
+          npm test
 
   frontend-build:
     name: Frontend React 19 (ESLint & Vite Build)
