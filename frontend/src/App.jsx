@@ -46,6 +46,57 @@ const LEGACY_CACHE_KEYS = [
   'cti_last_sync'
 ]
 
+const PRIMITIVE_LABELS = {
+  RECON_INFO_LEAK: 'Recon & Info Leak',
+  AUTH_BYPASS: 'Auth Bypass',
+  INJECTION_RCE: 'Injection / RCE',
+  PRIV_ESC: 'Privilege Escalation',
+  DENIAL_OF_SERVICE: 'Denial of Service',
+  GENERIC_VULN: 'Generic Vulnerability'
+}
+
+const formatarPrimitivaLabel = (prim) => {
+  if (!prim) return 'Tática'
+  return PRIMITIVE_LABELS[prim] || String(prim).replace(/_/g, ' ')
+}
+
+const chainTemKev = (chain) => {
+  if (!chain) return false
+  if (chain.writeup?.tem_kev) return true
+  return Boolean(chain.writeup?.passos_ataque?.some((p) => p.cisa_kev))
+}
+
+const correspondeEcossistema = (chainTech, filtro) => {
+  const a = String(chainTech || '').trim().toLowerCase()
+  const b = String(filtro || '').trim().toLowerCase()
+  if (!a || !b) return false
+  return a === b
+}
+
+const limparTituloBlueprint = (titulo) => {
+  if (!titulo) return 'Blueprint de Cadeia de Exploração'
+  return String(titulo).replace(/^(?:\s*\[[^\]]+\]\s*)+/, '').trim()
+}
+
+const separarResumoEAlertaKev = (resumo) => {
+  const texto = String(resumo || '').trim()
+  const marcador = 'ALERTA SOC:'
+  const idx = texto.indexOf(marcador)
+  if (idx === -1) {
+    return { textoPrincipal: texto, alertaSoc: null }
+  }
+  return {
+    textoPrincipal: texto.slice(0, idx).trim(),
+    alertaSoc: texto.slice(idx + marcador.length).trim()
+  }
+}
+
+const obterPapelPasso = (idx, total) => {
+  if (idx === 0) return 'Vetor Inicial'
+  if (idx === total - 1) return 'Impacto Final'
+  return 'Pivoting Tático'
+}
+
 function App() {
   const PROD_API_URL = 'https://cyber-threat-intel-mmks.onrender.com'
   const [apiUrl, setApiUrl] = useState(() => {
@@ -165,20 +216,9 @@ function App() {
   const [modalChainsAberto, setModalChainsAberto] = useState(false)
   const [filtroEcoChain, setFiltroEcoChain] = useState('TODOS')
   const [filtroKevChain, setFiltroKevChain] = useState(false)
+  const [buscaChain, setBuscaChain] = useState('')
   const [copiadoWriteup, setCopiadoWriteup] = useState(false)
-
-  const chainTemKev = (chain) => {
-    if (!chain) return false
-    if (chain.writeup?.tem_kev) return true
-    return Boolean(chain.writeup?.passos_ataque?.some((p) => p.cisa_kev))
-  }
-
-  const correspondeEcossistema = (chainTech, filtro) => {
-    const a = String(chainTech || '').trim().toLowerCase()
-    const b = String(filtro || '').trim().toLowerCase()
-    if (!a || !b) return false
-    return a === b
-  }
+  const detailPanelRef = useRef(null)
 
   const ecossistemasDisponiveis = useMemo(() => {
     const setEcos = new Set()
@@ -194,14 +234,33 @@ function App() {
     return exploitChains.filter((c) => chainTemKev(c)).length
   }, [exploitChains])
 
+  const totalChainsCriticas = useMemo(() => {
+    return exploitChains.filter((c) => c.severidade === 'CRITICAL').length
+  }, [exploitChains])
+
   const chainsFiltradas = useMemo(() => {
     if (!exploitChains || exploitChains.length === 0) return []
+    const termo = buscaChain.trim().toLowerCase()
     return exploitChains.filter((c) => {
       const okEco = filtroEcoChain === 'TODOS' || correspondeEcossistema(c.tecnologia, filtroEcoChain)
       const okKev = !filtroKevChain || chainTemKev(c)
-      return okEco && okKev
+      if (!okEco || !okKev) return false
+      if (!termo) return true
+
+      const textoAlvo = [
+        c.chain_id,
+        c.tecnologia,
+        ...(c.cves || []),
+        c.writeup?.titulo,
+        ...(c.writeup?.passos_ataque || []).flatMap((p) => [p.primitiva, p.cwe, p.acao])
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+
+      return textoAlvo.includes(termo)
     })
-  }, [exploitChains, filtroEcoChain, filtroKevChain])
+  }, [exploitChains, filtroEcoChain, filtroKevChain, buscaChain])
 
   const activeChain = useMemo(() => {
     if (!chainsFiltradas || chainsFiltradas.length === 0) {
@@ -209,6 +268,35 @@ function App() {
     }
     return chainsFiltradas.find((c) => c.chain_id === selectedChainId) || chainsFiltradas[0]
   }, [chainsFiltradas, selectedChainId])
+
+  const activeBlueprintMeta = useMemo(() => {
+    if (!activeChain || !activeChain.writeup) return null
+    const passos = activeChain.writeup.passos_ataque || []
+    const scoreVal = Number(activeChain.score_cvss || 10.0)
+    const scorePct = Math.min(100, Math.max(10, Math.round(scoreVal * 10)))
+    const isHigh = activeChain.severidade === 'HIGH'
+    const temKevAtivo = chainTemKev(activeChain)
+    const { textoPrincipal, alertaSoc } = separarResumoEAlertaKev(activeChain.writeup.resumo_executivo)
+    return { passos, scoreVal, scorePct, isHigh, temKevAtivo, textoPrincipal, alertaSoc }
+  }, [activeChain])
+
+  const selecionarChainCard = (chainId) => {
+    setSelectedChainId(chainId)
+    setCopiadoWriteup(false)
+    if (detailPanelRef.current) {
+      detailPanelRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
+
+  const resetarFiltrosModalChains = () => {
+    setFiltroEcoChain('TODOS')
+    setFiltroKevChain(false)
+    setBuscaChain('')
+    setCopiadoWriteup(false)
+    if (exploitChains.length > 0) {
+      setSelectedChainId(exploitChains[0].chain_id)
+    }
+  }
 
   const selecionarEcoNoModal = (ecoNome) => {
     setFiltroEcoChain(ecoNome)
@@ -221,12 +309,16 @@ function App() {
     })
     if (match) {
       setSelectedChainId(match.chain_id)
+      if (detailPanelRef.current) {
+        detailPanelRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+      }
     }
   }
 
   const abrirModalPorEcossistema = (techNome) => {
     setFiltroEcoChain(techNome)
     setFiltroKevChain(false)
+    setBuscaChain('')
     setCopiadoWriteup(false)
     setModalChainsAberto(true)
     if (exploitChains && exploitChains.length > 0) {
@@ -303,17 +395,24 @@ function App() {
     }
   }
 
-  // Listener para fechar o modal com a tecla ESC
+  // Listener para fechar o modal com a tecla ESC e travar scroll do fundo
   useEffect(() => {
+    if (!modalChainsAberto) return undefined
+
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setModalChainsAberto(false)
       }
     }
-    if (modalChainsAberto) {
-      window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', handleKeyDown)
     }
-    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [modalChainsAberto])
 
   // ---------------------------------------------------------------------------
@@ -1500,272 +1599,457 @@ function App() {
           onClick={() => setModalChainsAberto(false)}
           role="dialog"
           aria-modal="true"
+          aria-label="Exploit Chains e Attack Blueprints"
         >
           <div
             className="chains-modal-content"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Cabeçalho do Modal */}
+            {/* Cabeçalho Executivo com Mini-KPIs */}
             <div className="chains-modal-header">
               <div className="chains-modal-title-group">
                 <div className="modal-badge-row">
-                  <span className="modal-prefix">&gt;_ INTELLIGENCE ENGINE</span>
-                  <span className="modal-count-badge">{chainsFiltradas.length} Cadeias Detectadas</span>
+                  <span className="modal-live-dot" />
+                  <span className="modal-prefix">&gt;_ GRAPH INTELLIGENCE ENGINE</span>
+                  <span className="modal-engine-tag">NETWORKX + CPE 2.3</span>
                 </div>
                 <h2 className="chains-modal-title">
-                  EXPLOIT CHAINS &amp; WRITEUP BLUEPRINTS
+                  EXPLOIT CHAINS &amp; ATTACK BLUEPRINTS
                 </h2>
                 <span className="chains-modal-subtitle">
-                  Cadeias de ataque correlacionadas via Grafos Direcionados (NetworkX) e NLP Tático
+                  Cadeias multi-estágio correlacionadas por compatibilidade de ativo, transição tática e exploração ativa
                 </span>
               </div>
-              <button
-                type="button"
-                className="btn-close-modal"
-                onClick={() => setModalChainsAberto(false)}
-                title="Fechar (ESC)"
-              >
-                ✕ Fechar
-              </button>
-            </div>
 
-            {/* Barra de Filtro por Ecossistema e CISA KEV */}
-            <div className="modal-eco-filters">
-              <button
-                type="button"
-                className={`eco-filter-btn ${filtroEcoChain === 'TODOS' ? 'active' : ''}`}
-                onClick={() => selecionarEcoNoModal('TODOS')}
-              >
-                TODOS ({exploitChains.length})
-              </button>
-              {totalChainsKev > 0 && (
+              <div className="chains-header-right">
+                <div className="chains-kpi-strip">
+                  <div className="chains-mini-kpi">
+                    <span className="mini-kpi-val">{exploitChains.length}</span>
+                    <span className="mini-kpi-lbl">Cadeias</span>
+                  </div>
+                  <div className="chains-mini-kpi is-critical">
+                    <span className="mini-kpi-val">{totalChainsCriticas}</span>
+                    <span className="mini-kpi-lbl">Críticas</span>
+                  </div>
+                  <div className="chains-mini-kpi is-kev">
+                    <span className="mini-kpi-val">{totalChainsKev}</span>
+                    <span className="mini-kpi-lbl">CISA KEV</span>
+                  </div>
+                  <div className="chains-mini-kpi is-eco">
+                    <span className="mini-kpi-val">{ecossistemasDisponiveis.length}</span>
+                    <span className="mini-kpi-lbl">Alvos</span>
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  className={`eco-filter-btn eco-filter-kev ${filtroKevChain ? 'active' : ''}`}
-                  onClick={() => {
-                    setFiltroKevChain((prev) => !prev)
-                    setCopiadoWriteup(false)
-                  }}
-                  title="Filtrar apenas cadeias que possuem vulnerabilidades no catálogo CISA KEV"
+                  className="btn-close-modal"
+                  onClick={() => setModalChainsAberto(false)}
+                  title="Fechar janela (ESC)"
                 >
-                  CISA KEV ({totalChainsKev})
+                  <span className="close-esc-hint">ESC</span>
+                  <span>✕</span>
                 </button>
-              )}
-              {ecossistemasDisponiveis.map((eco) => {
-                const count = exploitChains.filter((c) => correspondeEcossistema(c.tecnologia, eco)).length
-                return (
-                  <button
-                    key={eco}
-                    type="button"
-                    className={`eco-filter-btn ${correspondeEcossistema(filtroEcoChain, eco) ? 'active' : ''}`}
-                    onClick={() => selecionarEcoNoModal(eco)}
-                  >
-                    {eco} ({count})
-                  </button>
-                )
-              })}
+              </div>
             </div>
 
-            {/* Corpo do Modal: Split-View */}
-            <div className="chains-modal-body">
-              {/* Coluna Esquerda: Lista de Cadeias */}
-              <div className="chains-sidebar-list">
-                <div className="sidebar-list-title">
-                  CADEIAS ({chainsFiltradas.length})
-                </div>
-                {chainsFiltradas.length > 0 ? (
-                  chainsFiltradas.map((chain) => {
-                    const isSelected = activeChain && activeChain.chain_id === chain.chain_id
-                    const temKev = chainTemKev(chain)
-                    const elosTotal = chain.writeup?.elos_count || (chain.cves ? chain.cves.length : 0)
-                    return (
-                      <div
-                        key={chain.chain_id}
-                        className={`chain-sidebar-card ${isSelected ? 'is-selected' : ''}`}
-                        onClick={() => {
-                          setSelectedChainId(chain.chain_id)
-                          setCopiadoWriteup(false)
-                        }}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            setSelectedChainId(chain.chain_id)
-                            setCopiadoWriteup(false)
-                          }
-                        }}
-                      >
-                        <div className="chain-card-header">
-                          <div className="chain-card-badges-left">
-                            <span className={`chain-card-badge ${chain.severidade === 'CRITICAL' ? 'badge-critical' : 'badge-high'}`}>
-                              {chain.severidade}
-                            </span>
-                            {temKev && (
-                              <span className="chain-kev-mini" title="Contém CVE confirmada no catálogo CISA KEV">
-                                KEV
-                              </span>
-                            )}
-                            {elosTotal > 0 && (
-                              <span className="chain-elos-mini">
-                                {elosTotal} elos
-                              </span>
-                            )}
-                          </div>
-                          <span className="chain-card-score">{Number(chain.score_cvss || 10.0).toFixed(1)}</span>
-                        </div>
-                        <div className="chain-card-tech">{chain.tecnologia}</div>
-                        <div className="chain-card-cves">
-                          {(chain.cves || []).join(' ➔ ')}
-                        </div>
-                      </div>
-                    )
-                  })
-                ) : (
-                  <div className="chains-empty-sidebar">
-                    <p>Nenhuma cadeia encontrada para o filtro atual.</p>
+            {/* Barra Unificada de Busca Rápida e Filtros por Ecossistema */}
+            <div className="chains-toolbar">
+              <div className="chains-toolbar-top">
+                <div className="chains-search-box">
+                  <span className="chains-search-prompt">&gt;_</span>
+                  <input
+                    type="text"
+                    className="chains-search-input"
+                    placeholder="Filtrar cadeias por CVE, ecossistema, CWE ou primitiva..."
+                    value={buscaChain}
+                    onChange={(e) => setBuscaChain(e.target.value)}
+                  />
+                  {buscaChain && (
                     <button
                       type="button"
-                      className="btn-reset-chain-filter"
-                      onClick={() => {
-                        setFiltroEcoChain('TODOS')
-                        setFiltroKevChain(false)
-                        if (exploitChains.length > 0) {
-                          setSelectedChainId(exploitChains[0].chain_id)
-                        }
-                      }}
+                      className="chains-search-clear"
+                      onClick={() => setBuscaChain('')}
+                      title="Limpar filtro de texto"
                     >
-                      Exibir todas as cadeias ({exploitChains.length})
+                      &times;
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
+
+                <div className="chains-toolbar-actions">
+                  {totalChainsKev > 0 && (
+                    <button
+                      type="button"
+                      className={`eco-filter-btn eco-filter-kev ${filtroKevChain ? 'active' : ''}`}
+                      onClick={() => {
+                        setFiltroKevChain((prev) => !prev)
+                        setCopiadoWriteup(false)
+                      }}
+                      title="Exibir apenas cadeias com vulnerabilidades confirmadas no CISA KEV"
+                    >
+                      <span className="kev-dot" />
+                      <span>CISA KEV</span>
+                      <span className="eco-pill-count">{totalChainsKev}</span>
+                    </button>
+                  )}
+
+                  {(filtroEcoChain !== 'TODOS' || filtroKevChain || buscaChain.trim()) && (
+                    <button
+                      type="button"
+                      className="btn-clear-chain-filters"
+                      onClick={resetarFiltrosModalChains}
+                    >
+                      ✕ Limpar
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {/* Coluna Direita: Writeup Blueprint Detalhado */}
-              <div className="chains-detail-panel">
-                {activeChain && activeChain.writeup ? (
+              <div className="modal-eco-filters">
+                <button
+                  type="button"
+                  className={`eco-filter-btn ${filtroEcoChain === 'TODOS' ? 'active' : ''}`}
+                  onClick={() => selecionarEcoNoModal('TODOS')}
+                >
+                  <span>Todos</span>
+                  <span className="eco-pill-count">{exploitChains.length}</span>
+                </button>
+                {ecossistemasDisponiveis.map((eco) => {
+                  const count = exploitChains.filter((c) => correspondeEcossistema(c.tecnologia, eco)).length
+                  return (
+                    <button
+                      key={eco}
+                      type="button"
+                      className={`eco-filter-btn ${correspondeEcossistema(filtroEcoChain, eco) ? 'active' : ''}`}
+                      onClick={() => selecionarEcoNoModal(eco)}
+                    >
+                      <span>{eco}</span>
+                      <span className="eco-pill-count">{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Corpo do Modal em Split-View com Scrolls Independentes */}
+            <div className="chains-modal-body">
+              {/* Coluna Esquerda: Catálogo de Cadeias */}
+              <aside className="chains-sidebar-list" aria-label="Lista de cadeias correlacionadas">
+                <div className="sidebar-list-header">
+                  <span className="sidebar-list-title">CADEIAS CORRELACIONADAS</span>
+                  <span className="sidebar-list-counter">
+                    {chainsFiltradas.length} / {exploitChains.length}
+                  </span>
+                </div>
+
+                <div className="chains-sidebar-cards">
+                  {chainsFiltradas.length > 0 ? (
+                    chainsFiltradas.map((chain) => {
+                      const isSelected = activeChain && activeChain.chain_id === chain.chain_id
+                      const temKev = chainTemKev(chain)
+                      const isCritical = chain.severidade === 'CRITICAL'
+                      const elosTotal = chain.writeup?.elos_count || (chain.cves ? chain.cves.length : 0)
+                      const scoreNum = Number(chain.score_cvss || 10.0)
+
+                      return (
+                        <div
+                          key={chain.chain_id}
+                          className={`chain-sidebar-card ${isSelected ? 'is-selected' : ''} ${isCritical ? 'sev-critical' : 'sev-high'}`}
+                          onClick={() => selecionarChainCard(chain.chain_id)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              selecionarChainCard(chain.chain_id)
+                            }
+                          }}
+                        >
+                          <div className="chain-card-header">
+                            <div className="chain-card-badges-left">
+                              <span className="chain-card-id">#{chain.chain_id}</span>
+                              <span className={`chain-card-badge ${isCritical ? 'badge-critical' : 'badge-high'}`}>
+                                {chain.severidade}
+                              </span>
+                              {temKev && (
+                                <span className="chain-kev-mini" title="Contém CVE confirmada no catálogo CISA KEV">
+                                  KEV
+                                </span>
+                              )}
+                            </div>
+                            <span className={`chain-card-score ${isCritical ? 'is-critical' : 'is-high'}`}>
+                              {scoreNum.toFixed(1)}
+                            </span>
+                          </div>
+
+                          <div className="chain-card-tech-row">
+                            <span className="chain-card-tech">{chain.tecnologia}</span>
+                            {elosTotal > 0 && (
+                              <span className="chain-elos-mini">{elosTotal} elos</span>
+                            )}
+                          </div>
+
+                          <div className="chain-card-cve-pills">
+                            {(chain.cves || []).map((cveId, cIdx) => (
+                              <Fragment key={`${chain.chain_id}-${cveId}-${cIdx}`}>
+                                <span className="sidebar-cve-chip">{cveId}</span>
+                                {cIdx < (chain.cves?.length || 0) - 1 && (
+                                  <span className="sidebar-cve-arrow">→</span>
+                                )}
+                              </Fragment>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div className="chains-empty-sidebar">
+                      <div className="empty-sidebar-icon">[!]</div>
+                      <p>Nenhuma cadeia corresponde aos filtros aplicados.</p>
+                      <button
+                        type="button"
+                        className="btn-reset-chain-filter"
+                        onClick={resetarFiltrosModalChains}
+                      >
+                        Restaurar todas ({exploitChains.length})
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </aside>
+
+              {/* Coluna Direita: Attack Blueprint Detalhado */}
+              <div className="chains-detail-panel" ref={detailPanelRef}>
+                {activeChain && activeBlueprintMeta ? (
                   <div className="writeup-blueprint-container">
-                    <div className="writeup-header">
-                      <div className="writeup-title-block">
-                        <div className="writeup-badge-row">
-                          <span className="writeup-label">WRITEUP BLUEPRINT</span>
-                          {chainTemKev(activeChain) && (
+                    {/* 1. Hero Card do Blueprint */}
+                    <div className="writeup-hero-card">
+                      <div className="writeup-top-bar">
+                        <div className="writeup-meta-tags">
+                          <span className="writeup-label">ATTACK BLUEPRINT</span>
+                          <span className="writeup-chain-id">{activeChain.chain_id}</span>
+                          <span className="writeup-target-tag">{activeChain.tecnologia}</span>
+                          <span className="writeup-elos-tag">
+                            {activeChain.writeup.elos_count || activeBlueprintMeta.passos.length} Elos Encadeados
+                          </span>
+                          {activeBlueprintMeta.temKevAtivo && (
                             <span className="writeup-kev-alert">CISA KEV ACTIVE</span>
                           )}
-                          <span className="writeup-target-tag">ALVO: {activeChain.tecnologia}</span>
-                          <span className="writeup-chain-id">ID: {activeChain.chain_id}</span>
-                          <button
-                            type="button"
-                            className={`btn-copy-writeup ${copiadoWriteup ? 'is-copied' : ''}`}
-                            onClick={() => copiarWriteupMarkdown(activeChain)}
-                            title="Copiar relatório técnico em Markdown para Jira / Slack / TheHive"
-                          >
-                            {copiadoWriteup ? '✓ Copiado!' : 'Copiar Markdown'}
-                          </button>
                         </div>
-                        <h3 className="writeup-title">{activeChain.writeup.titulo}</h3>
-                        <p className="writeup-summary">{activeChain.writeup.resumo_executivo}</p>
-                      </div>
-                      <div className={`writeup-score-block ${activeChain.severidade === 'HIGH' ? 'is-high' : ''}`}>
-                        <span className="writeup-score-title">SCORE COMPOSTO</span>
-                        <span className="writeup-score-number">{Number(activeChain.score_cvss || 10.0).toFixed(1)}</span>
-                        <span className="writeup-score-sub">{activeChain.severidade} RISK</span>
-                      </div>
-                    </div>
 
-                    {/* Fluxo Visual Sequencial de Nós da Cadeia */}
-                    <div
-                      className={`chain-steps-flow ${(activeChain.writeup.passos_ataque?.length || 0) > 2 ? 'is-multi-step' : ''}`}
-                    >
-                      {activeChain.writeup.passos_ataque && activeChain.writeup.passos_ataque.map((passo, idx) => {
-                        const temProximo = idx < activeChain.writeup.passos_ataque.length - 1
-                        const cweValido = passo.cwe && passo.cwe !== 'NVD-CWE-noinfo' && passo.cwe !== 'NVD-CWE-Other'
-                        return (
-                          <Fragment key={`${passo.cve_id}-${idx}`}>
-                            <div className="chain-step-node">
-                              <div className="step-node-header">
-                                <span className="step-badge">PASSO {passo.passo}</span>
-                                <a
-                                  href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(passo.cve_id)}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="step-cve-link"
-                                  title={`Abrir detalhes de ${passo.cve_id} no NIST NVD`}
-                                >
-                                  <span>{passo.cve_id}</span>
-                                  <span>↗</span>
-                                </a>
-                                {Number(passo.nota_cvss) > 0 && (
-                                  <span className="step-cvss-pill">
-                                    CVSS {Number(passo.nota_cvss).toFixed(1)}
-                                  </span>
-                                )}
-                                {passo.cisa_kev && (
-                                  <span className="cve-kev-tag" title="Vulnerabilidade confirmada no catálogo CISA KEV">
-                                    CISA KEV
-                                  </span>
-                                )}
-                                {cweValido && (
-                                  <span className="cve-cwe-tag">
-                                    {passo.cwe}
-                                  </span>
-                                )}
-                                <span className={`step-primitive-pill primitive-${String(passo.primitiva || '').toLowerCase()}`}>
-                                  {passo.primitiva}
-                                </span>
-                                <button
-                                  type="button"
-                                  className="btn-step-feed"
-                                  onClick={() => inspecionarCveNoFeed(passo.cve_id)}
-                                  title={`Localizar ${passo.cve_id} na tabela principal`}
-                                >
-                                  Ver no Feed
-                                </button>
-                              </div>
-                              <div className="step-action-text">{passo.acao}</div>
-                              <div className="step-detail-text">{passo.detalhe}</div>
+                        <button
+                          type="button"
+                          className={`btn-copy-writeup ${copiadoWriteup ? 'is-copied' : ''}`}
+                          onClick={() => copiarWriteupMarkdown(activeChain)}
+                          title="Copiar relatório técnico em Markdown para Jira / Slack / TheHive"
+                        >
+                          {copiadoWriteup ? '✓ Markdown Copiado' : '⎘ Exportar Markdown'}
+                        </button>
+                      </div>
+
+                      <div className="writeup-header">
+                        <div className="writeup-title-block">
+                          <h3 className="writeup-title">
+                            {limparTituloBlueprint(activeChain.writeup.titulo)}
+                          </h3>
+                          <p className="writeup-summary">{activeBlueprintMeta.textoPrincipal}</p>
+
+                          {activeBlueprintMeta.alertaSoc && (
+                            <div className="writeup-soc-callout">
+                              <span className="soc-callout-badge">ALERTA SOC</span>
+                              <span className="soc-callout-text">{activeBlueprintMeta.alertaSoc}</span>
                             </div>
-                            {temProximo && (
-                              <div className="step-connector" aria-hidden="true">
-                                <span className="step-connector-arrow">➔</span>
-                              </div>
-                            )}
-                          </Fragment>
-                        )
-                      })}
+                          )}
+                        </div>
+
+                        <div className={`writeup-score-block ${activeBlueprintMeta.isHigh ? 'is-high' : ''}`}>
+                          <span className="writeup-score-title">SCORE COMPOSTO</span>
+                          <div className="writeup-score-main">
+                            <span className="writeup-score-number">{activeBlueprintMeta.scoreVal.toFixed(1)}</span>
+                            <span className="writeup-score-max">/10</span>
+                          </div>
+                          <div className="writeup-score-meter">
+                            <div
+                              className="writeup-score-meter-fill"
+                              style={{ width: `${activeBlueprintMeta.scorePct}%` }}
+                            />
+                          </div>
+                          <span className="writeup-score-sub">{activeChain.severidade} RISK</span>
+                        </div>
+                      </div>
                     </div>
 
+                    {/* 2. Topologia Visual da Kill Chain */}
+                    {activeBlueprintMeta.passos.length > 0 && (
+                      <div className="killchain-topology-box">
+                        <div className="blueprint-section-title">
+                          <span className="section-dot dot-purple" />
+                          <span>TOPOLOGIA DA CADEIA DE EXPLORAÇÃO</span>
+                        </div>
+
+                        <div className="killchain-topology-track">
+                          {activeBlueprintMeta.passos.map((passo, idx) => (
+                            <Fragment key={`topo-${passo.cve_id}-${idx}`}>
+                              <div className={`topology-node primitive-border-${String(passo.primitiva || '').toLowerCase()}`}>
+                                <div className="topology-node-top">
+                                  <span className="topology-step-num">ELO 0{passo.passo || idx + 1}</span>
+                                  {Number(passo.nota_cvss) > 0 && (
+                                    <span className={`topology-cvss ${getScoreClass(passo.nota_cvss)}`}>
+                                      {Number(passo.nota_cvss).toFixed(1)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="topology-cve-id">{passo.cve_id}</div>
+                                <div className="topology-prim-row">
+                                  <span className={`step-primitive-pill primitive-${String(passo.primitiva || '').toLowerCase()}`}>
+                                    {formatarPrimitivaLabel(passo.primitiva)}
+                                  </span>
+                                  {passo.cisa_kev && (
+                                    <span className="topology-kev-dot" title="CISA KEV">KEV</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {idx < activeBlueprintMeta.passos.length - 1 && (
+                                <div className="topology-connector" aria-hidden="true">
+                                  <span className="topology-connector-line" />
+                                  <span className="topology-connector-arrow">▶</span>
+                                </div>
+                              )}
+                            </Fragment>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. Timeline Tática Vertical Conectada */}
+                    <div className="chain-timeline-section">
+                      <div className="blueprint-section-title">
+                        <span className="section-dot dot-cyan" />
+                        <span>PROGRESSÃO TÁTICA PASSO A PASSO</span>
+                      </div>
+
+                      <div className="chain-timeline-list">
+                        {activeBlueprintMeta.passos.map((passo, idx) => {
+                          const ultimoPasso = idx === activeBlueprintMeta.passos.length - 1
+                          const cweValido = passo.cwe && passo.cwe !== 'NVD-CWE-noinfo' && passo.cwe !== 'NVD-CWE-Other'
+                          const primSlug = String(passo.primitiva || '').toLowerCase()
+
+                          return (
+                            <div key={`step-${passo.cve_id}-${idx}`} className="timeline-item">
+                              <div className="timeline-rail" aria-hidden="true">
+                                <span className={`timeline-node-badge ${passo.cisa_kev ? 'is-kev' : ''}`}>
+                                  0{passo.passo || idx + 1}
+                                </span>
+                                {!ultimoPasso && <span className="timeline-rail-line" />}
+                              </div>
+
+                              <div className={`timeline-step-card primitive-accent-${primSlug}`}>
+                                <div className="step-card-top">
+                                  <div className="step-card-meta-left">
+                                    <span className="step-role-tag">
+                                      {obterPapelPasso(idx, activeBlueprintMeta.passos.length)}
+                                    </span>
+                                    <a
+                                      href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(passo.cve_id)}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="step-cve-link"
+                                      title={`Consultar ${passo.cve_id} no NIST NVD`}
+                                    >
+                                      <span>{passo.cve_id}</span>
+                                      <span>↗</span>
+                                    </a>
+                                    <span
+                                      className={`step-primitive-pill primitive-${primSlug}`}
+                                      title={passo.primitiva}
+                                    >
+                                      {formatarPrimitivaLabel(passo.primitiva)}
+                                    </span>
+                                    {cweValido && (
+                                      <span className="cve-cwe-tag">{passo.cwe}</span>
+                                    )}
+                                    {passo.cisa_kev && (
+                                      <span className="cve-kev-tag" title="Exploração ativa confirmada no catálogo CISA KEV">
+                                        CISA KEV
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="step-card-meta-right">
+                                    {Number(passo.nota_cvss) > 0 && (
+                                      <span className={`step-cvss-pill ${getScoreClass(passo.nota_cvss)}`}>
+                                        CVSS {Number(passo.nota_cvss).toFixed(1)}
+                                      </span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="btn-step-feed"
+                                      onClick={() => inspecionarCveNoFeed(passo.cve_id)}
+                                      title={`Localizar ${passo.cve_id} na tabela principal`}
+                                    >
+                                      Ver no Feed →
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="step-action-text">{passo.acao}</div>
+                                <div className="step-detail-text">{passo.detalhe}</div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 4. Impacto Consolidado & Plano de Mitigação SOC */}
                     <div className="writeup-footer-grid">
                       <div className="writeup-impact-box">
-                        <div className="footer-box-title">IMPACTO TÉCNICO CONSOLIDADO</div>
-                        <div className="footer-box-content">{activeChain.writeup.impacto_tecnico}</div>
+                        <div className="footer-box-header">
+                          <span className="section-dot dot-red" />
+                          <span className="footer-box-title">IMPACTO TÉCNICO CONSOLIDADO</span>
+                        </div>
+                        <div className="footer-box-content">
+                          {activeChain.writeup.impacto_tecnico}
+                        </div>
                       </div>
+
                       <div className="writeup-mitigation-box">
-                        <div className="footer-box-title">MITIGAÇÕES RECOMENDADAS PELO SOC</div>
-                        <ul className="footer-box-list">
-                          {activeChain.writeup.mitigacoes_recomendadas && activeChain.writeup.mitigacoes_recomendadas.map((mit, i) => (
-                            <li key={i}>{mit}</li>
-                          ))}
+                        <div className="footer-box-header">
+                          <span className="section-dot dot-green" />
+                          <span className="footer-box-title">PLANO DE MITIGAÇÃO RECOMENDADO (SOC)</span>
+                        </div>
+                        <ul className="footer-mitigation-list">
+                          {(activeChain.writeup.mitigacoes_recomendadas || []).map((mit, i) => {
+                            const isPrioridadeKev = String(mit).includes('CISA KEV')
+                            return (
+                              <li
+                                key={i}
+                                className={`mitigation-item ${isPrioridadeKev ? 'is-kev-priority' : ''}`}
+                              >
+                                <span className="mitigation-bullet" aria-hidden="true">
+                                  {isPrioridadeKev ? '!' : '✓'}
+                                </span>
+                                <span>{mit}</span>
+                              </li>
+                            )
+                          })}
                         </ul>
                       </div>
                     </div>
                   </div>
                 ) : (
                   <div className="no-chain-selected">
-                    <p>Nenhuma cadeia selecionada ou disponível para este ecossistema.</p>
-                    {(filtroEcoChain !== 'TODOS' || filtroKevChain) && (
+                    <div className="empty-sidebar-icon">[!]</div>
+                    <p>Nenhuma cadeia selecionada ou disponível para os filtros atuais.</p>
+                    {(filtroEcoChain !== 'TODOS' || filtroKevChain || buscaChain.trim()) && (
                       <button
                         type="button"
                         className="btn-reset-chain-filter"
-                        onClick={() => {
-                          setFiltroEcoChain('TODOS')
-                          setFiltroKevChain(false)
-                          if (exploitChains.length > 0) {
-                            setSelectedChainId(exploitChains[0].chain_id)
-                          }
-                        }}
+                        onClick={resetarFiltrosModalChains}
                       >
-                        Exibir todas as cadeias ({exploitChains.length})
+                        Restaurar todas as cadeias ({exploitChains.length})
                       </button>
                     )}
                   </div>
