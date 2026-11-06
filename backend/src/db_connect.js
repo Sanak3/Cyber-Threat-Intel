@@ -2,12 +2,15 @@ const { Pool } = require('pg');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
-// Configuração do pool de conexão com suporte a SSL seguro (Secure by Default)
+// Configuração do pool de conexão com suporte a SSL seguro para AWS RDS
+// Se DB_SSL_CA estiver definido, valida estritamente a cadeia de certificados;
+// caso contrário, desativa a validação estrita (rejectUnauthorized: false) para evitar erro
+// SELF_SIGNED_CERT_IN_CHAIN em ambientes de deploy como o Render quando a CA da RDS não é injetada.
 const sslConfig = process.env.DB_SSL === 'false'
     ? false
     : (process.env.DB_SSL_CA
         ? { ca: process.env.DB_SSL_CA, rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' }
-        : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' });
+        : { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true' });
 
 const pool = new Pool({
     host: process.env.DB_HOST,
