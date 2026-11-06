@@ -374,14 +374,8 @@ function App() {
 
     carregarTelemetriaEOverview()
 
-    // Keep-alive silencioso: ping a cada 9 minutos para manter a instância do Render ativa enquanto a aba estiver aberta
-    const keepAliveTimer = setInterval(() => {
-      axios.get(`${apiUrl}/api/health`).catch(() => {})
-    }, 9 * 60 * 1000)
-
     return () => {
       isMounted = false
-      clearInterval(keepAliveTimer)
     }
   }, [apiUrl])
 
