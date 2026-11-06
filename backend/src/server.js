@@ -91,7 +91,14 @@ const TECH_PALETTE = {
     'Google / Android': '#fbbf24',
     'OpenSSL / Crypto': '#ec4899',
     'Fortinet / SonicWall': '#14b8a6',
-    'VMware': '#8b5cf6'
+    'VMware': '#8b5cf6',
+    'GitLab / DevOps': '#fb7185',
+    'WordPress': '#60a5fa',
+    'Ivanti / Pulse Secure': '#f43f5e',
+    'Palo Alto / Juniper': '#f59e0b',
+    'Citrix / NetScaler': '#2dd4bf',
+    'Atlassian': '#818cf8',
+    'Nginx / F5': '#34d399'
 };
 
 // Helper para Chains com Fallback Inteligente (garante que sempre haja inteligência visível)
@@ -99,144 +106,29 @@ function gerarChainsPadrao() {
     return [
         {
             chain_id: "CHAIN-0001",
-            tecnologia: "Apache Foundation",
-            severidade: "CRITICAL",
-            score_cvss: 9.8,
-            cves: ["CVE-2024-38816", "CVE-2024-38819"],
-            writeup: {
-                chain_id: "CHAIN-0001",
-                titulo: "[CRITICAL] Cadeia de Ataque em Apache Foundation: Execução Remota de Código (RCE) Não Autenticado (2 Elos)",
-                tecnologia: "Apache Foundation",
-                severidade: "CRITICAL",
-                score_cvss: 9.8,
-                cves: ["CVE-2024-38816", "CVE-2024-38819"],
-                resumo_executivo: "Foi identificada uma correlação de alto risco envolvendo o ecossistema Apache Foundation. Um agente malicioso pode encadear um Directory Traversal com Deserialização insegura para alcançar execução arbitrária de código no servidor sem credenciais prévias.",
-                passos_ataque: [
-                    {
-                        passo: 1,
-                        cve_id: "CVE-2024-38816",
-                        primitiva: "RECON_INFO_LEAK",
-                        nota_cvss: 7.5,
-                        acao: "Acesso Inicial / Leitura de Arquivos Arbitrários via CVE-2024-38816 (Directory Traversal).",
-                        detalhe: "O atacante envia requisições HTTP forjadas contendo sequências '../' para extrair arquivos de configuração interna e chaves de sessão do servidor."
-                    },
-                    {
-                        passo: 2,
-                        cve_id: "CVE-2024-38819",
-                        primitiva: "INJECTION_RCE",
-                        nota_cvss: 9.8,
-                        acao: "Pivoting / Injeção de Código via CVE-2024-38819 (Insecure Deserialization).",
-                        detalhe: "Utilizando as chaves extraídas no Passo 1, o atacante assina um payload malicioso serializado que é processado pelo Tomcat/HTTP Server, disparando um reverse shell como www-data."
-                    }
-                ],
-                impacto_tecnico: "Execução de comandos arbitrários no contexto do serviço vulnerável. Possibilidade de abertura de reverse shell, extração de dados sensíveis e persistência lateral.",
-                mitigacoes_recomendadas: [
-                    "Aplicar patches de segurança emergenciais para os identificadores: CVE-2024-38816 e CVE-2024-38819.",
-                    "Configurar regras de WAF/IPS para bloquear sequências de path traversal e payloads serializados.",
-                    "Isolar o processo da aplicação em container não-root com permissões mínimas de filesystem."
-                ]
-            }
-        },
-        {
-            chain_id: "CHAIN-0002",
-            tecnologia: "Linux / Kernel",
-            severidade: "CRITICAL",
-            score_cvss: 9.6,
-            cves: ["CVE-2024-1086", "CVE-2024-21626"],
-            writeup: {
-                chain_id: "CHAIN-0002",
-                titulo: "[CRITICAL] Cadeia de Ataque em Linux / Kernel: Fuga de Container e Escalação para Root (2 Elos)",
-                tecnologia: "Linux / Kernel",
-                severidade: "CRITICAL",
-                score_cvss: 9.6,
-                cves: ["CVE-2024-1086", "CVE-2024-21626"],
-                resumo_executivo: "Identificada cadeia crítica de escape e elevação de privilégios no Linux Kernel. Permite a um invasor dentro de um container Docker/Kubernetes escapar para o host e obter controle root total da máquina física ou VM.",
-                passos_ataque: [
-                    {
-                        passo: 1,
-                        cve_id: "CVE-2024-21626",
-                        primitiva: "AUTH_BYPASS",
-                        nota_cvss: 8.6,
-                        acao: "Container Breakout via Leaked File Descriptor (runc).",
-                        detalhe: "O atacante abusa de descritores de arquivos abertos durante a inicialização do container para acessar o sistema de arquivos do host (/proc/self/cwd)."
-                    },
-                    {
-                        passo: 2,
-                        cve_id: "CVE-2024-1086",
-                        primitiva: "PRIV_ESC",
-                        nota_cvss: 9.6,
-                        acao: "Escalação Local de Privilégios para Root via Use-After-Free no nf_tables.",
-                        detalhe: "No host, explora a falha no módulo netfilter/nf_tables do kernel para sobrescrever credenciais de processo e obter UID 0 (root)."
-                    }
-                ],
-                impacto_tecnico: "Comprometimento irrestrito do host hospedeiro. O atacante assume o controle da infraestrutura de virtualização e containers vizinhos.",
-                mitigacoes_recomendadas: [
-                    "Atualizar o kernel do Linux para a versão mais recente com correção para nf_tables.",
-                    "Atualizar runc para versão >= 1.1.12 nos nós de Kubernetes e Docker hosts.",
-                    "Desativar namespaces de usuário não privilegiados (unprivileged user namespaces) onde não estritamente necessário."
-                ]
-            }
-        },
-        {
-            chain_id: "CHAIN-0003",
-            tecnologia: "Microsoft / Windows",
-            severidade: "CRITICAL",
-            score_cvss: 9.8,
-            cves: ["CVE-2024-21410", "CVE-2024-21413"],
-            writeup: {
-                chain_id: "CHAIN-0003",
-                titulo: "[CRITICAL] Cadeia de Ataque em Microsoft / Windows: NTLM Relay até Execução Remota de Código (2 Elos)",
-                tecnologia: "Microsoft / Windows",
-                severidade: "CRITICAL",
-                score_cvss: 9.8,
-                cves: ["CVE-2024-21410", "CVE-2024-21413"],
-                resumo_executivo: "Cadeia envolvendo serviços Microsoft Exchange e Outlook. Um invasor remoto não autenticado consegue forçar autenticação NTLM e reaproveitar hashes para executar código arbitrário na estação ou servidor de e-mail.",
-                passos_ataque: [
-                    {
-                        passo: 1,
-                        cve_id: "CVE-2024-21410",
-                        primitiva: "AUTH_BYPASS",
-                        nota_cvss: 9.8,
-                        acao: "Bypass de Autenticação via NTLM Relay no Microsoft Exchange Server.",
-                        detalhe: "O invasor intercepta e faz relay de credenciais NTLM de um cliente para o Exchange Server, autenticando-se como a vítima."
-                    },
-                    {
-                        passo: 2,
-                        cve_id: "CVE-2024-21413",
-                        primitiva: "INJECTION_RCE",
-                        nota_cvss: 9.8,
-                        acao: "Execução Remota de Código via Moniker Link no Microsoft Outlook.",
-                        detalhe: "Com o acesso obtido, envia e-mails contendo links maliciosos no protocolo file:// que burla a checagem de modo protegido do Outlook e executa binário externo."
-                    }
-                ],
-                impacto_tecnico: "Controle sobre caixas postais corporativas e execução de código remoto em máquinas de domínio Windows / Active Directory.",
-                mitigacoes_recomendadas: [
-                    "Habilitar Extended Protection for Authentication (EPA) nos servidores Exchange.",
-                    "Bloquear tráfego SMB de saída (porta 445) no perímetro para impedir vazamento de hashes NTLM.",
-                    "Instalar as atualizações cumulativas de segurança da Microsoft de Fevereiro/2024 ou superior."
-                ]
-            }
-        },
-        {
-            chain_id: "CHAIN-0004",
             tecnologia: "Cisco Systems",
             severidade: "CRITICAL",
             score_cvss: 10.0,
             cves: ["CVE-2023-20198", "CVE-2023-20273"],
             writeup: {
-                chain_id: "CHAIN-0004",
-                titulo: "[CRITICAL] Cadeia de Ataque em Cisco Systems: Acesso Administrativo Web até Implante Root (2 Elos)",
+                chain_id: "CHAIN-0001",
+                titulo: "[CRITICAL] [CISA KEV] Cadeia em Cisco Systems: Bypass de Autenticação até Execução Remota de Código (RCE) (2 Elos)",
                 tecnologia: "Cisco Systems",
                 severidade: "CRITICAL",
                 score_cvss: 10.0,
+                elos_count: 2,
+                kev_count: 2,
+                tem_kev: true,
                 cves: ["CVE-2023-20198", "CVE-2023-20273"],
-                resumo_executivo: "Cadeia notória em roteadores e switches Cisco IOS XE expostos à internet. Permite a criação de usuário com nível de privilégio 15 (máximo) e subsequente injeção de comandos como root no sistema operacional subjacente.",
+                resumo_executivo: "Correlação tática identificada no ecossistema Cisco Systems encadeando CVE-2023-20198 ➔ CVE-2023-20273. O vetor inicia com contorno direto de mecanismos de autenticação na Web UI do IOS XE e progride por pivoting até implante root persistente (Score Composto: 10.0/10.0). ALERTA SOC: 2 elo(s) desta cadeia constam no catálogo CISA KEV com exploração ativa confirmada in-the-wild.",
                 passos_ataque: [
                     {
                         passo: 1,
                         cve_id: "CVE-2023-20198",
                         primitiva: "AUTH_BYPASS",
                         nota_cvss: 10.0,
+                        cwe: "CWE-306",
+                        cisa_kev: true,
                         acao: "Criação de Conta com Privilégio 15 via Web UI desprotegida.",
                         detalhe: "O invasor interage diretamente com a interface web de gerenciamento do IOS XE sem autenticação para registrar uma nova conta administrativa."
                     },
@@ -245,15 +137,158 @@ function gerarChainsPadrao() {
                         cve_id: "CVE-2023-20273",
                         primitiva: "INJECTION_RCE",
                         nota_cvss: 7.2,
+                        cwe: "CWE-78",
+                        cisa_kev: true,
                         acao: "Injeção de Comandos como Root e Instalação de Implante Malicioso.",
                         detalhe: "Utilizando a nova conta de privilégio 15, explora a injeção no mecanismo de configuração para salvar um implante persistente no filesystem."
                     }
                 ],
                 impacto_tecnico: "Controle total da infraestrutura de roteamento e comutação da organização. Possibilidade de espionagem e interceptação de todo tráfego de rede.",
                 mitigacoes_recomendadas: [
-                    "Desabilitar imediatamente a interface Web UI do Cisco IOS XE em interfaces externas.",
-                    "Atualizar para a versão do firmware com patch fornecido pela Cisco.",
-                    "Auditar as contas locais do dispositivo em busca de usuários com privilégio 15 não autorizados."
+                    "PRIORIDADE MÁXIMA (CISA KEV): Aplicar correções emergenciais imediatas para CVE-2023-20198, CVE-2023-20273.",
+                    "Desabilitar imediatamente a interface HTTP/HTTPS Server (Web UI) do Cisco IOS XE em interfaces voltadas à internet.",
+                    "Auditar contas locais em busca de usuários nível 15 não autorizados e artefatos de implante no servidor web."
+                ]
+            }
+        },
+        {
+            chain_id: "CHAIN-0002",
+            tecnologia: "Microsoft / Windows",
+            severidade: "CRITICAL",
+            score_cvss: 9.9,
+            cves: ["CVE-2024-21410", "CVE-2024-21413"],
+            writeup: {
+                chain_id: "CHAIN-0002",
+                titulo: "[CRITICAL] [CISA KEV] Cadeia em Microsoft / Windows: NTLM Relay até Execução Remota de Código (2 Elos)",
+                tecnologia: "Microsoft / Windows",
+                severidade: "CRITICAL",
+                score_cvss: 9.9,
+                elos_count: 2,
+                kev_count: 2,
+                tem_kev: true,
+                cves: ["CVE-2024-21410", "CVE-2024-21413"],
+                resumo_executivo: "Cadeia envolvendo serviços Microsoft Exchange e Outlook. Um invasor remoto não autenticado força autenticação NTLM e reaproveita credenciais para executar código arbitrário no ambiente corporativo. ALERTA SOC: 2 elo(s) desta cadeia constam no catálogo CISA KEV com exploração ativa confirmada in-the-wild.",
+                passos_ataque: [
+                    {
+                        passo: 1,
+                        cve_id: "CVE-2024-21410",
+                        primitiva: "AUTH_BYPASS",
+                        nota_cvss: 9.8,
+                        cwe: "CWE-287",
+                        cisa_kev: true,
+                        acao: "Bypass de Autenticação via NTLM Relay no Microsoft Exchange Server.",
+                        detalhe: "O invasor intercepta e faz relay de credenciais NTLM de um cliente para o Exchange Server, autenticando-se como a vítima."
+                    },
+                    {
+                        passo: 2,
+                        cve_id: "CVE-2024-21413",
+                        primitiva: "INJECTION_RCE",
+                        nota_cvss: 9.8,
+                        cwe: "CWE-94",
+                        cisa_kev: true,
+                        acao: "Execução Remota de Código via Moniker Link no Microsoft Outlook.",
+                        detalhe: "Com o acesso obtido, envia e-mails contendo links maliciosos no protocolo file:// que burla o Modo Protegido do Outlook e executa binário externo."
+                    }
+                ],
+                impacto_tecnico: "Controle sobre caixas postais corporativas e execução de código remoto em estações de domínio Windows / Active Directory.",
+                mitigacoes_recomendadas: [
+                    "PRIORIDADE MÁXIMA (CISA KEV): Instalar atualizações cumulativas da Microsoft para CVE-2024-21410 e CVE-2024-21413.",
+                    "Habilitar Extended Protection for Authentication (EPA) nos servidores Exchange.",
+                    "Bloquear tráfego SMB de saída (porta 445/TCP) no perímetro para impedir vazamento de hashes NTLM."
+                ]
+            }
+        },
+        {
+            chain_id: "CHAIN-0003",
+            tecnologia: "Linux / Kernel",
+            severidade: "CRITICAL",
+            score_cvss: 9.7,
+            cves: ["CVE-2024-21626", "CVE-2024-1086"],
+            writeup: {
+                chain_id: "CHAIN-0003",
+                titulo: "[CRITICAL] [CISA KEV] Cadeia em Linux / Kernel: Fuga de Container até Escalação Root (2 Elos)",
+                tecnologia: "Linux / Kernel",
+                severidade: "CRITICAL",
+                score_cvss: 9.7,
+                elos_count: 2,
+                kev_count: 2,
+                tem_kev: true,
+                cves: ["CVE-2024-21626", "CVE-2024-1086"],
+                resumo_executivo: "Cadeia crítica de escape de container e elevação local de privilégios no Linux Kernel. Permite a um invasor escapar de um pod Docker/Kubernetes e assumir UID 0 (root) no host físico/VM. ALERTA SOC: 2 elo(s) desta cadeia constam no catálogo CISA KEV.",
+                passos_ataque: [
+                    {
+                        passo: 1,
+                        cve_id: "CVE-2024-21626",
+                        primitiva: "AUTH_BYPASS",
+                        nota_cvss: 8.6,
+                        cwe: "CWE-200",
+                        cisa_kev: true,
+                        acao: "Container Breakout via Leaked File Descriptor (runc).",
+                        detalhe: "O atacante abusa de descritores de arquivos abertos durante a inicialização do container para acessar o filesystem do host (/proc/self/cwd)."
+                    },
+                    {
+                        passo: 2,
+                        cve_id: "CVE-2024-1086",
+                        primitiva: "PRIV_ESC",
+                        nota_cvss: 7.8,
+                        cwe: "CWE-416",
+                        cisa_kev: true,
+                        acao: "Escalação Local de Privilégios para Root via Use-After-Free no nf_tables.",
+                        detalhe: "No host, explora corrupção de memória no netfilter/nf_tables do kernel para sobrescrever credenciais de processo e obter UID 0."
+                    }
+                ],
+                impacto_tecnico: "Comprometimento irrestrito do nó hospedeiro e de todos os containers/workloads co-alocados no cluster.",
+                mitigacoes_recomendadas: [
+                    "PRIORIDADE MÁXIMA (CISA KEV): Atualizar Linux Kernel (patch nf_tables) e runc >= 1.1.12 para corrigir CVE-2024-1086 e CVE-2024-21626.",
+                    "Desativar namespaces de usuário não privilegiados (kernel.unprivileged_userns_clone=0) nos nós de produção.",
+                    "Monitorar eventos de runtime (Falco/Tetragon) para acessos anômalos a /proc/self/fd e elevação súbita de UID."
+                ]
+            }
+        },
+        {
+            chain_id: "CHAIN-0004",
+            tecnologia: "Apache Foundation",
+            severidade: "CRITICAL",
+            score_cvss: 9.6,
+            cves: ["CVE-2024-38816", "CVE-2024-38819"],
+            writeup: {
+                chain_id: "CHAIN-0004",
+                titulo: "[CRITICAL] [CISA KEV] Cadeia em Apache Foundation: Exposição de Artefatos até Execução Remota de Código (2 Elos)",
+                tecnologia: "Apache Foundation",
+                severidade: "CRITICAL",
+                score_cvss: 9.6,
+                elos_count: 2,
+                kev_count: 1,
+                tem_kev: true,
+                cves: ["CVE-2024-38816", "CVE-2024-38819"],
+                resumo_executivo: "Correlação de alto risco no ecossistema Java/Apache Tomcat. O atacante encadeia leitura arbitrária de arquivos via Path Traversal para extrair segredos de aplicação e alcançar RCE não autenticado.",
+                passos_ataque: [
+                    {
+                        passo: 1,
+                        cve_id: "CVE-2024-38816",
+                        primitiva: "RECON_INFO_LEAK",
+                        nota_cvss: 7.5,
+                        cwe: "CWE-22",
+                        cisa_kev: false,
+                        acao: "Acesso Inicial / Leitura de Arquivos Sensíveis via Directory Traversal.",
+                        detalhe: "Requisições HTTP forjadas exploram roteamento estático mal configurado para extrair variáveis de ambiente e chaves de sessão."
+                    },
+                    {
+                        passo: 2,
+                        cve_id: "CVE-2024-38819",
+                        primitiva: "INJECTION_RCE",
+                        nota_cvss: 9.8,
+                        cwe: "CWE-22",
+                        cisa_kev: true,
+                        acao: "Pivoting / Execução Arbitrária com Credenciais Exfiltradas.",
+                        detalhe: "Utilizando os artefatos exfiltrados no Passo 1, forja requisições autenticadas/assinadas que disparam execução remota no container web."
+                    }
+                ],
+                impacto_tecnico: "Execução de comandos no contexto da aplicação web, exfiltração de credenciais de banco de dados e persistência lateral.",
+                mitigacoes_recomendadas: [
+                    "Aplicar patches emergenciais para CVE-2024-38816 e CVE-2024-38819.",
+                    "Configurar regras de WAF/IPS bloqueando sequências codificadas de path traversal (%2e%2e/) e sanitizar rotas estáticas.",
+                    "Executar o servidor de aplicação sob usuário não-root com filesystem somente leitura."
                 ]
             }
         }
@@ -338,7 +373,7 @@ async function obterChains(limit = 50) {
         const query = `
             SELECT chain_id, tecnologia, severidade, score_cvss, cves, writeup, data_criacao
             FROM exploit_chains
-            ORDER BY score_cvss DESC, data_criacao DESC
+            ORDER BY COALESCE((writeup->>'tem_kev')::boolean, false) DESC, score_cvss DESC, data_criacao DESC
             LIMIT $1;
         `;
         const { rows } = await pool.query(query, [MAX_CHAINS_CACHE]);
