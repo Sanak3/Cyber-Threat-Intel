@@ -14,6 +14,7 @@ from ml_engine.primitives import (
     extrair_primitiva,
     extrair_tecnologia,
     extrair_subproduto,
+    obter_mitre_attack,
     enriquecer_vulnerabilidades
 )
 from ml_engine.chain_detector import ExploitChainDetector
@@ -401,6 +402,81 @@ class TestThreatPipeline(unittest.TestCase):
         self.assertEqual(writeup_kev["passos_ataque"][0]["cwe"], "CWE-287")
         self.assertTrue(writeup_kev["passos_ataque"][0]["cisa_kev"])
         self.assertTrue(any("CISA KEV" in m for m in writeup_kev["mitigacoes_recomendadas"]))
+
+    def test_mitre_attack_e_priorizacao_epss_nas_chains(self):
+        # Mapeamento MITRE ATT&CK por primitiva e override específico de CWE
+        mitre_deser = obter_mitre_attack(AttackPrimitive.INJECTION_RCE, "CWE-502")
+        self.assertEqual(mitre_deser["tactic_id"], "TA0002")
+        self.assertEqual(mitre_deser["technique_id"], "T1203")
+
+        mitre_privesc = obter_mitre_attack(AttackPrimitive.PRIV_ESC, "CWE-269")
+        self.assertEqual(mitre_privesc["tactic_id"], "TA0004")
+        self.assertEqual(mitre_privesc["technique_id"], "T1068")
+
+        vulns = [
+            {
+                "id_cve": "CVE-2026-5001",
+                "descricao": "Authentication bypass in Fortinet FortiOS SSL-VPN",
+                "nota_cvss": 8.1,
+                "severidade": "HIGH",
+                "cwe": "CWE-287",
+                "cpe_vendor": "fortinet",
+                "cpe_product": "fortios",
+                "cisa_kev": False,
+                "epss_score": 0.92,
+            },
+            {
+                "id_cve": "CVE-2026-5002",
+                "descricao": "Remote command injection in Fortinet FortiOS CLI",
+                "nota_cvss": 8.8,
+                "severidade": "HIGH",
+                "cwe": "CWE-78",
+                "cpe_vendor": "fortinet",
+                "cpe_product": "fortios",
+                "cisa_kev": False,
+                "epss_score": 0.89,
+            },
+            {
+                "id_cve": "CVE-2026-5003",
+                "descricao": "Authentication bypass in Oracle WebLogic console",
+                "nota_cvss": 8.1,
+                "severidade": "HIGH",
+                "cwe": "CWE-287",
+                "cpe_vendor": "oracle",
+                "cpe_product": "weblogic",
+                "cisa_kev": False,
+                "epss_score": 0.01,
+            },
+            {
+                "id_cve": "CVE-2026-5004",
+                "descricao": "Remote code execution in Oracle WebLogic",
+                "nota_cvss": 8.8,
+                "severidade": "HIGH",
+                "cwe": "CWE-502",
+                "cpe_vendor": "oracle",
+                "cpe_product": "weblogic",
+                "cisa_kev": False,
+                "epss_score": 0.01,
+            },
+        ]
+
+        df = enriquecer_vulnerabilidades(vulns)
+        detector = ExploitChainDetector()
+        detector.construir_grafo(df)
+        chains = detector.detectar_chains(max_chains=10)
+
+        self.assertEqual(len(chains), 2)
+        # Mesmo com CVSS idênticos, a cadeia Fortinet (EPSS 92%) deve superar Oracle (EPSS 1%)
+        self.assertEqual(chains[0]["tecnologia"], "Fortinet / SonicWall")
+        self.assertGreater(chains[0]["score_combinado"], chains[1]["score_combinado"])
+        self.assertAlmostEqual(chains[0]["max_epss"], 0.92, places=2)
+
+        writeup = WriteupBuilder.construir_writeup(chains[0])
+        self.assertAlmostEqual(writeup["max_epss"], 0.92, places=2)
+        self.assertGreaterEqual(len(writeup["taticas_mitre"]), 2)
+        self.assertEqual(writeup["passos_ataque"][0]["mitre_attack"]["technique_id"], "T1078")
+        self.assertEqual(writeup["passos_ataque"][1]["mitre_attack"]["technique_id"], "T1059")
+        self.assertAlmostEqual(writeup["passos_ataque"][0]["epss_score"], 0.92, places=2)
 
 
 if __name__ == "__main__":

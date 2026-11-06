@@ -116,8 +116,8 @@ class ExploitChainDetector:
     def _calcular_score_composto(cve_detalhes: List[Dict[str, Any]], kev_count: int) -> float:
         """
         Calcula score composto sem saturação artificial:
-        combina maior nota (65%), média dos elos (35%), sinergia do encadeamento
-        e bonificação tática para vulnerabilidades confirmadas no catálogo CISA KEV.
+        combina maior nota (65%), média dos elos (35%), sinergia do encadeamento,
+        probabilidade real de exploração EPSS (FIRST.org) e bonificação CISA KEV.
         """
         notas = [_float_seguro(c.get("nota_cvss")) for c in cve_detalhes if _float_seguro(c.get("nota_cvss")) > 0]
         if not notas:
@@ -127,11 +127,13 @@ class ExploitChainDetector:
             media_notas = sum(notas) / len(notas)
             base = (0.65 * max_nota) + (0.35 * media_notas)
 
+        max_epss = max((_float_seguro(c.get("epss_score")) for c in cve_detalhes), default=0.0)
         elos_extras = max(0, min(len(cve_detalhes) - 2, 2))
         bonus_sinergia = 0.25 + (0.20 * elos_extras)
         bonus_kev = min(0.50, 0.30 * kev_count)
+        bonus_epss = min(0.35, 0.35 * max_epss)
 
-        return round(min(10.0, base + bonus_sinergia + bonus_kev), 1)
+        return round(min(10.0, base + bonus_sinergia + bonus_kev + bonus_epss), 1)
 
     def construir_grafo(self, df_vulnerabilidades: pd.DataFrame, max_arestas_por_no: int = 6) -> nx.DiGraph:
         """
@@ -168,6 +170,7 @@ class ExploitChainDetector:
                 subproduto=subprod,
                 cwe=_str_segura(row.get("cwe"), "NVD-CWE-noinfo"),
                 cisa_kev=_bool_seguro(row.get("cisa_kev")),
+                epss_score=round(max(0.0, min(1.0, _float_seguro(row.get("epss_score")))), 5),
                 data_publicacao=data_pub,
             )
 
@@ -180,9 +183,14 @@ class ExploitChainDetector:
         total_arestas = 0
         for tech, group in tech_groups:
             cves = group.to_dict("records")
-            # Prioriza CVEs exploradas ativamente (CISA KEV) e de maior severidade CVSS
+            # Prioriza CVEs exploradas ativamente (CISA KEV), ponderação CVSS+EPSS e severidade base
             cves.sort(
-                key=lambda x: (_bool_seguro(x.get("cisa_kev")), _float_seguro(x.get("nota_cvss"))),
+                key=lambda x: (
+                    _bool_seguro(x.get("cisa_kev")),
+                    round(_float_seguro(x.get("nota_cvss")) + (2.0 * _float_seguro(x.get("epss_score"))), 3),
+                    _float_seguro(x.get("epss_score")),
+                    _float_seguro(x.get("nota_cvss"))
+                ),
                 reverse=True
             )
 
@@ -235,9 +243,13 @@ class ExploitChainDetector:
 
         def chave_prioridade_no(node_id: str):
             attr = self.graph.nodes[node_id]
+            cvss = float(attr.get("nota_cvss", 0.0))
+            epss = float(attr.get("epss_score", 0.0))
             return (
                 1 if attr.get("cisa_kev") else 0,
-                float(attr.get("nota_cvss", 0.0))
+                round(cvss + (2.0 * epss), 3),
+                epss,
+                cvss
             )
 
         # Nós de entrada (Acesso Inicial: Recon ou Auth Bypass) ordenados por KEV e CVSS
@@ -305,6 +317,7 @@ class ExploitChainDetector:
                         tecnologia = cve_detalhes[0]["tecnologia"]
                         kev_count = sum(1 for c in cve_detalhes if c.get("cisa_kev"))
                         tem_kev = kev_count > 0
+                        max_epss = round(max((_float_seguro(c.get("epss_score")) for c in cve_detalhes), default=0.0), 5)
 
                         score_combinado = self._calcular_score_composto(cve_detalhes, kev_count)
 
@@ -333,6 +346,7 @@ class ExploitChainDetector:
                             "severidade_chain": severidade_chain,
                             "kev_count": kev_count,
                             "tem_kev": tem_kev,
+                            "max_epss": max_epss,
                         })
 
                         chains_por_tech[tech_origem] = chains_por_tech.get(tech_origem, 0) + 1
@@ -353,9 +367,14 @@ class ExploitChainDetector:
             if len(chains_candidatas) >= limite_coleta:
                 break
 
-        # Ordena globalmente priorizando cadeias com exploração ativa (CISA KEV), maior score composto e profundidade
+        # Ordena globalmente priorizando cadeias com exploração ativa (CISA KEV), maior score composto, EPSS e profundidade
         chains_candidatas.sort(
-            key=lambda c: (1 if c.get("tem_kev") else 0, c.get("score_combinado", 0.0), c.get("elos_count", 0)),
+            key=lambda c: (
+                1 if c.get("tem_kev") else 0,
+                c.get("score_combinado", 0.0),
+                c.get("max_epss", 0.0),
+                c.get("elos_count", 0)
+            ),
             reverse=True
         )
 

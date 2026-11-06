@@ -169,6 +169,97 @@ CWE_PRIMITIVE_MAP = {
     "CWE-835": AttackPrimitive.DENIAL_OF_SERVICE
 }
 
+# Mapeamento tático MITRE ATT&CK Enterprise por Primitiva e refinamento por CWE
+MITRE_PRIMITIVE_MAP = {
+    AttackPrimitive.RECON_INFO_LEAK: {
+        "tactic_id": "TA0001",
+        "tactic": "Initial Access",
+        "technique_id": "T1190",
+        "technique": "Exploit Public-Facing Application"
+    },
+    AttackPrimitive.AUTH_BYPASS: {
+        "tactic_id": "TA0006",
+        "tactic": "Credential Access",
+        "technique_id": "T1078",
+        "technique": "Valid Accounts / Auth Bypass"
+    },
+    AttackPrimitive.INJECTION_RCE: {
+        "tactic_id": "TA0002",
+        "tactic": "Execution",
+        "technique_id": "T1059",
+        "technique": "Command and Scripting Interpreter"
+    },
+    AttackPrimitive.PRIV_ESC: {
+        "tactic_id": "TA0004",
+        "tactic": "Privilege Escalation",
+        "technique_id": "T1068",
+        "technique": "Exploitation for Privilege Escalation"
+    },
+    AttackPrimitive.DENIAL_OF_SERVICE: {
+        "tactic_id": "TA0040",
+        "tactic": "Impact",
+        "technique_id": "T1499",
+        "technique": "Endpoint Denial of Service"
+    },
+    AttackPrimitive.GENERIC_VULN: {
+        "tactic_id": "TA0001",
+        "tactic": "Initial Access",
+        "technique_id": "T1190",
+        "technique": "Exploit Public-Facing Application"
+    }
+}
+
+CWE_MITRE_OVERRIDES = {
+    "CWE-22": {
+        "tactic_id": "TA0009",
+        "tactic": "Collection",
+        "technique_id": "T1005",
+        "technique": "Data from Local System"
+    },
+    "CWE-200": {
+        "tactic_id": "TA0009",
+        "tactic": "Collection",
+        "technique_id": "T1005",
+        "technique": "Data from Local System"
+    },
+    "CWE-532": {
+        "tactic_id": "TA0006",
+        "tactic": "Credential Access",
+        "technique_id": "T1552",
+        "technique": "Unsecured Credentials"
+    },
+    "CWE-798": {
+        "tactic_id": "TA0006",
+        "tactic": "Credential Access",
+        "technique_id": "T1552",
+        "technique": "Unsecured Credentials"
+    },
+    "CWE-89": {
+        "tactic_id": "TA0001",
+        "tactic": "Initial Access",
+        "technique_id": "T1190",
+        "technique": "Exploit Public-Facing Application"
+    },
+    "CWE-918": {
+        "tactic_id": "TA0001",
+        "tactic": "Initial Access",
+        "technique_id": "T1190",
+        "technique": "Exploit Public-Facing Application"
+    },
+    "CWE-502": {
+        "tactic_id": "TA0002",
+        "tactic": "Execution",
+        "technique_id": "T1203",
+        "technique": "Exploitation for Client/Server Execution"
+    },
+    "CWE-79": {
+        "tactic_id": "TA0002",
+        "tactic": "Execution",
+        "technique_id": "T1059.007",
+        "technique": "JavaScript Execution"
+    }
+}
+
 CPE_VENDOR_MAP = {
     "microsoft": "Microsoft / Windows",
     "linux": "Linux / Kernel",
@@ -271,6 +362,20 @@ def extrair_primitiva(descricao: str, cwe: str = None) -> Dict[str, Any]:
         "estagio": 0,
         "termo_encontrado": None
     }
+
+
+def obter_mitre_attack(primitiva: str, cwe: str = None) -> Dict[str, str]:
+    """
+    Resolve a Tática e Técnica oficial do MITRE ATT&CK Enterprise para o elo de ataque,
+    priorizando overrides específicos de CWE sobre o mapeamento da primitiva.
+    """
+    cwe_clean = _limpar_str_opcional(cwe).upper()
+    if cwe_clean in CWE_MITRE_OVERRIDES:
+        return CWE_MITRE_OVERRIDES[cwe_clean].copy()
+
+    prim_clean = _limpar_str_opcional(primitiva) or AttackPrimitive.GENERIC_VULN
+    base = MITRE_PRIMITIVE_MAP.get(prim_clean, MITRE_PRIMITIVE_MAP[AttackPrimitive.GENERIC_VULN])
+    return base.copy()
 
 
 def extrair_subproduto(descricao: str, cpe_product: str = None) -> str:

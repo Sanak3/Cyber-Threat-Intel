@@ -1,4 +1,5 @@
 from typing import List, Dict, Any
+from .primitives import obter_mitre_attack
 
 
 class WriteupBuilder:
@@ -81,6 +82,8 @@ class WriteupBuilder:
             descricao = cve.get("descricao", "")
             cwe = cve.get("cwe") or "NVD-CWE-noinfo"
             cisa_kev = bool(cve.get("cisa_kev", False))
+            epss_score = round(float(cve.get("epss_score") or 0.0), 5)
+            mitre_attack = obter_mitre_attack(primitiva, cwe)
 
             if i == 0:
                 acao = f"Acesso Inicial / Exploração de Perímetro via {cve_id} ({primitiva})."
@@ -101,6 +104,8 @@ class WriteupBuilder:
                 "nota_cvss": nota,
                 "cwe": cwe,
                 "cisa_kev": cisa_kev,
+                "epss_score": epss_score,
+                "mitre_attack": mitre_attack,
                 "acao": acao,
                 "detalhe": detalhe_tecnico
             })
@@ -197,16 +202,28 @@ class WriteupBuilder:
         impacto = cls._gerar_impacto(cve_detalhes)
         mitigacoes = cls._gerar_mitigacoes(chain)
 
+        max_epss = round(
+            float(chain.get("max_epss") or max((float(c.get("epss_score") or 0.0) for c in cve_detalhes), default=0.0)),
+            5
+        )
+        taticas_mitre = list(dict.fromkeys(
+            f"{p['mitre_attack']['tactic_id']} ({p['mitre_attack']['technique_id']})"
+            for p in passos
+            if p.get("mitre_attack")
+        ))
+
         return {
             "chain_id": chain.get("chain_id"),
             "titulo": titulo,
             "tecnologia": tecnologia,
             "severidade": severidade,
             "score_cvss": chain.get("score_combinado"),
+            "max_epss": max_epss,
             "elos_count": elos_count,
             "kev_count": kev_count,
             "tem_kev": tem_kev,
             "cves": cves,
+            "taticas_mitre": taticas_mitre,
             "resumo_executivo": resumo,
             "passos_ataque": passos,
             "impacto_tecnico": impacto,
