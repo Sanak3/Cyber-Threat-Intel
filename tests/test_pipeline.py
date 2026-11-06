@@ -57,6 +57,34 @@ class TestThreatPipeline(unittest.TestCase):
         self.assertEqual(score, 5.0)
         self.assertEqual(sev, "MEDIUM")
 
+    def test_extrair_metricas_cvss_v2_promove_critical(self):
+        # No CVSS v2 legado, notas 9.0-10.0 vinham como HIGH; devem ser normalizadas para CRITICAL
+        metrics = {
+            "cvssMetricV2": [{
+                "cvssData": {
+                    "baseScore": 10.0
+                },
+                "baseSeverity": "HIGH"
+            }]
+        }
+        score, sev = extrair_metricas_cvss(metrics)
+        self.assertEqual(score, 10.0)
+        self.assertEqual(sev, "CRITICAL")
+
+    def test_extrair_metricas_cvss_v40_fallback(self):
+        metrics = {
+            "cvssMetricV40": [{
+                "type": "Primary",
+                "cvssData": {
+                    "baseScore": 9.3,
+                    "baseSeverity": "CRITICAL"
+                }
+            }]
+        }
+        score, sev = extrair_metricas_cvss(metrics)
+        self.assertEqual(score, 9.3)
+        self.assertEqual(sev, "CRITICAL")
+
     def test_extrair_metricas_cvss_empty(self):
         score, sev = extrair_metricas_cvss({})
         self.assertEqual(score, 0.0)

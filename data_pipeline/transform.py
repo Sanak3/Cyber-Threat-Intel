@@ -1,52 +1,80 @@
 import numpy as np
 
 
+def normalizar_severidade_cvss(score_float, severity_raw=None):
+    """
+    Normaliza o rótulo de severidade pela escala canônica CVSS v3/v4,
+    garantindo que notas >= 9.0 (inclusive vindas do CVSS v2 legado onde o teto era HIGH)
+    sejam classificadas como CRITICAL para manter 100% de paridade com os KPIs e filtros SQL.
+    """
+    if score_float >= 9.0:
+        return "CRITICAL"
+    if score_float >= 7.0:
+        return "HIGH"
+    if score_float >= 4.0:
+        return "MEDIUM"
+    if score_float > 0.0:
+        return "LOW"
+    if severity_raw and str(severity_raw).upper() in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+        return str(severity_raw).upper()
+    return "UNKNOWN"
+
+
+def _selecionar_metrica_preferencial(metric_list):
+    """Prioriza a avaliação Primary (NIST NVD) sobre Secondary (CNA/ADP) quando disponível."""
+    if not metric_list or not isinstance(metric_list, list):
+        return None
+    primaria = next((m for m in metric_list if isinstance(m, dict) and m.get("type") == "Primary"), None)
+    return primaria or metric_list[0]
+
+
 def extrair_metricas_cvss(metrics):
     """
     Extrai score e severidade com cadeia de fallback:
-    CVSS v3.1 -> CVSS v3.0 -> CVSS v2.0 -> Default (0.0, 'UNKNOWN').
+    CVSS v3.1 -> CVSS v4.0 -> CVSS v3.0 -> CVSS v2.0 -> Default (0.0, 'UNKNOWN').
     """
     if not isinstance(metrics, dict):
         return 0.0, "UNKNOWN"
 
-    # 1. Tentativa com CVSS v3.1 (Padrão mais recente)
-    v31_list = metrics.get("cvssMetricV31", [])
-    if v31_list and isinstance(v31_list, list):
-        cvss_data = v31_list[0].get("cvssData", {})
+    # 1. Tentativa com CVSS v3.1
+    v31_item = _selecionar_metrica_preferencial(metrics.get("cvssMetricV31", []))
+    if v31_item:
+        cvss_data = v31_item.get("cvssData", {})
         score = cvss_data.get("baseScore")
         severity = cvss_data.get("baseSeverity")
-        if score is not None:
-            return float(score), str(severity or "UNKNOWN").upper()
-
-    # 2. Tentativa com CVSS v3.0
-    v30_list = metrics.get("cvssMetricV30", [])
-    if v30_list and isinstance(v30_list, list):
-        cvss_data = v30_list[0].get("cvssData", {})
-        score = cvss_data.get("baseScore")
-        severity = cvss_data.get("baseSeverity")
-        if score is not None:
-            return float(score), str(severity or "UNKNOWN").upper()
-
-    # 3. Tentativa com CVSS v2.0 (Legado)
-    v2_list = metrics.get("cvssMetricV2", [])
-    if v2_list and isinstance(v2_list, list):
-        cvss_data = v2_list[0].get("cvssData", {})
-        score = cvss_data.get("baseScore")
-        # No CVSS v2 da NVD, baseSeverity pode estar no nível superior do item ou dentro de cvssData
-        severity = v2_list[0].get("baseSeverity") or cvss_data.get("baseSeverity")
         if score is not None:
             score_float = float(score)
-            if not severity:
-                # Classificação canônica CVSS v2
-                if score_float >= 7.0:
-                    severity = "HIGH"
-                elif score_float >= 4.0:
-                    severity = "MEDIUM"
-                elif score_float > 0.0:
-                    severity = "LOW"
-                else:
-                    severity = "UNKNOWN"
-            return score_float, str(severity).upper()
+            return score_float, normalizar_severidade_cvss(score_float, severity)
+
+    # 2. Tentativa com CVSS v4.0 (Recente em CVEs de 2024-2026)
+    v40_item = _selecionar_metrica_preferencial(metrics.get("cvssMetricV40", []))
+    if v40_item:
+        cvss_data = v40_item.get("cvssData", {})
+        score = cvss_data.get("baseScore")
+        severity = cvss_data.get("baseSeverity")
+        if score is not None:
+            score_float = float(score)
+            return score_float, normalizar_severidade_cvss(score_float, severity)
+
+    # 3. Tentativa com CVSS v3.0
+    v30_item = _selecionar_metrica_preferencial(metrics.get("cvssMetricV30", []))
+    if v30_item:
+        cvss_data = v30_item.get("cvssData", {})
+        score = cvss_data.get("baseScore")
+        severity = cvss_data.get("baseSeverity")
+        if score is not None:
+            score_float = float(score)
+            return score_float, normalizar_severidade_cvss(score_float, severity)
+
+    # 4. Tentativa com CVSS v2.0 (Legado - promove score >= 9.0 de HIGH para CRITICAL)
+    v2_item = _selecionar_metrica_preferencial(metrics.get("cvssMetricV2", []))
+    if v2_item:
+        cvss_data = v2_item.get("cvssData", {})
+        score = cvss_data.get("baseScore")
+        severity = v2_item.get("baseSeverity") or cvss_data.get("baseSeverity")
+        if score is not None:
+            score_float = float(score)
+            return score_float, normalizar_severidade_cvss(score_float, severity)
 
     return 0.0, "UNKNOWN"
 
@@ -99,16 +127,8 @@ def transformar_dados(dados_brutos):
         metrics = cve.get("metrics", {})
         nota, severidade = extrair_metricas_cvss(metrics)
 
-        # Fallback de severidade baseado na nota se veio UNKNOWN mas nota > 0
-        if (not severidade or severidade == "UNKNOWN") and nota > 0.0:
-            if nota >= 9.0:
-                severidade = "CRITICAL"
-            elif nota >= 7.0:
-                severidade = "HIGH"
-            elif nota >= 4.0:
-                severidade = "MEDIUM"
-            else:
-                severidade = "LOW"
+        # Normalização canônica garantida para alinhar 100% KPIs SQL e filtros da tabela
+        severidade = normalizar_severidade_cvss(nota, severidade)
 
         # Extração de datas oficiais do NIST
         data_publicacao = cve.get("published")
