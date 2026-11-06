@@ -1,0 +1,83 @@
+name: CI Full-Stack Quality Gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  pipeline-tests:
+    name: Python ETL & ML Engine (Pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout do Repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'data_pipeline/requirements.txt'
+
+      - name: Instalar Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r data_pipeline/requirements.txt
+
+      - name: Validar Sintaxe e Executar Suite Pytest
+        run: |
+          python -m py_compile data_pipeline/extract.py data_pipeline/transform.py data_pipeline/upload_aws.py
+          python -m py_compile data_pipeline/ml_engine/primitives.py data_pipeline/ml_engine/clusterizer.py data_pipeline/ml_engine/chain_detector.py
+          pytest tests/ -v
+
+  backend-check:
+    name: Backend Express API (Syntax & Dependencies)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout do Repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'backend/package-lock.json'
+
+      - name: Instalar Dependencias e Validar Modulos
+        run: |
+          npm ci
+          npm run check
+
+  frontend-build:
+    name: Frontend React 19 (ESLint & Vite Build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout do Repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Instalar Dependencias, Executar Lint e Build de Producao
+        run: |
+          npm ci
+          npm run lint
+          npm run build
