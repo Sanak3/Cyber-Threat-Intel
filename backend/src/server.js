@@ -70,6 +70,15 @@ const memoryCache = {
 };
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora de cache em memória (RAM)
 
+function limparCache() {
+    memoryCache.analytics = { data: null, expiresAt: 0 };
+    memoryCache.stats = { data: null, expiresAt: 0 };
+    memoryCache.chains = { data: null, expiresAt: 0 };
+    memoryCache.clusters = { data: null, expiresAt: 0 };
+    memoryCache.overview = { data: null, expiresAt: 0 };
+    memoryCache.defaultThreats = {};
+}
+
 const TECH_PALETTE = {
     'Microsoft / Windows': '#00d4ff',
     'PHP Ecosystem': '#38bdf8',
@@ -426,6 +435,20 @@ async function obterDefaultThreats(limit = 25) {
 // Rota de Healthcheck
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Cyber Threat API rodando com sucesso!' });
+});
+
+// Endpoint Interno: Invalidação de Cache disparada por Webhook Seguro (ETL Pipeline)
+app.post('/api/internal/cache-flush', (req, res) => {
+    const configuredSecret = process.env.INTERNAL_WEBHOOK_SECRET;
+    const incomingSecret = req.headers['x-webhook-secret'] || (req.headers.authorization && req.headers.authorization.replace('Bearer ', ''));
+
+    if (!configuredSecret || incomingSecret !== configuredSecret) {
+        return res.status(401).json({ error: 'Acesso não autorizado: segredo do webhook inválido ou não configurado.' });
+    }
+
+    limparCache();
+    console.log('[+] [Cache Engine] Cache em RAM invalidado com sucesso via Webhook Interno.');
+    res.json({ status: 'OK', message: 'Cache em RAM invalidado com sucesso.' });
 });
 
 // Rota Consolidada de Alta Performance (Single Round-Trip Bootstrap)
