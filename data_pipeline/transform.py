@@ -100,12 +100,13 @@ def sanitizar_texto(texto):
     return texto_limpo.strip()
 
 
-def transformar_dados(dados_brutos):
+def transformar_dados(dados_brutos, mapa_epss=None):
     """
     Processa e normaliza vulnerabilidades em memória com NumPy,
-    calculando matriz vetorial de risco e estatísticas agregadas.
+    calculando matriz vetorial de risco, enriquecimento EPSS e estatísticas agregadas.
 
     :param dados_brutos: Dicionário contendo lista de 'vulnerabilities' do NIST.
+    :param mapa_epss: Dicionário opcional {cve_id: {"epss": float, "percentile": float}}.
     :return: Lista de dicionários normalizados prontos para carga no banco.
     """
     print("[+] [ETL Transform] Iniciando transformação e análise matricial com NumPy...")
@@ -186,6 +187,19 @@ def transformar_dados(dados_brutos):
         # Catálogo CISA KEV (Known Exploited Vulnerabilities - Exploited in the Wild)
         cisa_kev = bool(cve.get("cisaExploitAdd"))
 
+        # Probabilidade de exploração real em 30 dias via FIRST.org EPSS (0.0 a 1.0)
+        info_epss = (mapa_epss or {}).get(id_cve) or {}
+        epss_raw = info_epss.get("epss", cve.get("epss_score", 0.0))
+        epss_pct_raw = info_epss.get("percentile", cve.get("epss_percentile", 0.0))
+        try:
+            epss_score = round(max(0.0, min(1.0, float(epss_raw or 0.0))), 5)
+        except (TypeError, ValueError):
+            epss_score = 0.0
+        try:
+            epss_percentile = round(max(0.0, min(1.0, float(epss_pct_raw or 0.0))), 5)
+        except (TypeError, ValueError):
+            epss_percentile = 0.0
+
         vulnerabilidades_limpas.append({
             "id_cve": id_cve,
             "descricao": descricao,
@@ -196,7 +210,9 @@ def transformar_dados(dados_brutos):
             "cwe": cwe_extraido,
             "cpe_vendor": cpe_vendor,
             "cpe_product": cpe_product,
-            "cisa_kev": cisa_kev
+            "cisa_kev": cisa_kev,
+            "epss_score": epss_score,
+            "epss_percentile": epss_percentile
         })
 
         if nota > 0.0:

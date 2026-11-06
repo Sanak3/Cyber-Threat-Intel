@@ -7,7 +7,7 @@ import pandas as pd
 # Adiciona o diretório data_pipeline ao path para importação direta
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data_pipeline")))
 
-from extract import extrair_dados_nist
+from extract import extrair_dados_nist, extrair_scores_epss
 from transform import extrair_metricas_cvss, sanitizar_texto, transformar_dados
 from ml_engine.primitives import (
     AttackPrimitive,
@@ -235,6 +235,79 @@ class TestThreatPipeline(unittest.TestCase):
         self.assertIsNotNone(resultado)
         self.assertEqual(len(resultado["vulnerabilities"]), 2)
         self.assertEqual(mock_session.get.call_count, 1)
+
+    @patch("extract.time.sleep", return_value=None)
+    @patch("extract.requests.Session")
+    def test_extrair_dados_nist_mescla_catalogo_kev_sem_duplicar(self, mock_session_cls, _mock_sleep):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
+        resp_discovery = MagicMock(status_code=200)
+        resp_discovery.raise_for_status.return_value = None
+        resp_discovery.json.return_value = {"totalResults": 5000}
+
+        resp_main = MagicMock(status_code=200)
+        resp_main.raise_for_status.return_value = None
+        resp_main.json.return_value = {
+            "totalResults": 5000,
+            "vulnerabilities": [
+                {"cve": {"id": "CVE-2026-3001"}},
+                {"cve": {"id": "CVE-2026-3002", "cisaExploitAdd": "2026-05-01"}}
+            ]
+        }
+
+        resp_kev = MagicMock(status_code=200)
+        resp_kev.raise_for_status.return_value = None
+        resp_kev.json.return_value = {
+            "totalResults": 2,
+            "vulnerabilities": [
+                {"cve": {"id": "CVE-2026-3002", "cisaExploitAdd": "2026-05-01"}},
+                {"cve": {"id": "CVE-2021-44228", "cisaExploitAdd": "2021-12-10"}}
+            ]
+        }
+
+        mock_session.get.side_effect = [resp_discovery, resp_main, resp_kev]
+
+        resultado = extrair_dados_nist(total_desejado=2, max_por_pagina=2, buscar_mais_recentes=True)
+        self.assertIsNotNone(resultado)
+        ids_retornados = [v["cve"]["id"] for v in resultado["vulnerabilities"]]
+        self.assertEqual(ids_retornados, ["CVE-2026-3001", "CVE-2026-3002", "CVE-2021-44228"])
+
+    @patch("extract.requests.Session")
+    def test_extrair_scores_epss_e_transform_enriquecido(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "data": [
+                {"cve": "CVE-2026-4001", "epss": "0.94123", "percentile": "0.99871"},
+                {"cve": "CVE-2026-4002", "epss": "0.01250", "percentile": "0.45100"}
+            ]
+        }
+        mock_session.get.return_value = mock_resp
+
+        mapa_epss = extrair_scores_epss(["CVE-2026-4001", "CVE-2026-4002", "CVE-2026-4001"])
+        self.assertEqual(mapa_epss["CVE-2026-4001"]["epss"], 0.94123)
+        self.assertEqual(mapa_epss["CVE-2026-4001"]["percentile"], 0.99871)
+
+        payload = {
+            "vulnerabilities": [
+                {
+                    "cve": {
+                        "id": "CVE-2026-4001",
+                        "vulnStatus": "Analyzed",
+                        "descriptions": [{"lang": "en", "value": "Remote code execution in Apache Struts"}],
+                        "metrics": {
+                            "cvssMetricV31": [{"type": "Primary", "cvssData": {"baseScore": 9.8, "baseSeverity": "CRITICAL"}}]
+                        }
+                    }
+                }
+            ]
+        }
+        vulns, _ = transformar_dados(payload, mapa_epss=mapa_epss)
+        self.assertAlmostEqual(vulns[0]["epss_score"], 0.94123, places=5)
+        self.assertAlmostEqual(vulns[0]["epss_percentile"], 0.99871, places=5)
 
     def test_chain_detector_isola_subprodutos_e_prioriza_kev(self):
         # Jenkins e Kubernetes pertencem a "GitLab / DevOps", mas não devem formar cadeia espúria sem CPE

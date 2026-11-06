@@ -9,7 +9,128 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 load_dotenv()
 
 
-def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_recentes=True, janela_dias=None):
+def _extrair_catalogo_kev_nist(session, base_url, delay_requisicao):
+    """
+    Baixa o catálogo completo de vulnerabilidades confirmadas no CISA KEV (?hasKev)
+    diretamente da API v2.0 do NIST NVD (~1.2k registros em 1 lote de 2.000),
+    garantindo que ameaças de anos anteriores exploradas ativamente não fiquem fora do offset recente.
+    """
+    kev_vulns = []
+    kev_offset = 0
+    results_per_page = 2000
+
+    print("[*] [ETL Extract] Sincronizando catálogo complementar CISA KEV (?hasKev) no NIST NVD...")
+    while True:
+        url_kev = f"{base_url}?noRejected&hasKev&resultsPerPage={results_per_page}&startIndex={kev_offset}"
+        sucesso_pagina = False
+
+        for tentativa in range(1, 4):
+            try:
+                res = session.get(url_kev, timeout=45)
+                if res.status_code == 429:
+                    time.sleep(30)
+                    continue
+                if res.status_code in [503, 504]:
+                    time.sleep(2 ** tentativa * 3)
+                    continue
+
+                res.raise_for_status()
+                payload = res.json()
+                pagina = payload.get("vulnerabilities", [])
+                total_kev = payload.get("totalResults", 0)
+
+                kev_vulns.extend(pagina)
+                sucesso_pagina = True
+
+                if not pagina or kev_offset + len(pagina) >= total_kev:
+                    print(f"[+] [ETL Extract] Catálogo CISA KEV sincronizado: {len(kev_vulns):,} CVEs ativas obtidas.")
+                    return kev_vulns
+
+                kev_offset += len(pagina)
+                time.sleep(delay_requisicao)
+                break
+            except requests.exceptions.RequestException as err:
+                espera = 2 ** tentativa * 2
+                print(f"[!] [ETL Extract] Aviso ao consultar ?hasKev ({err}). Retry em {espera}s ({tentativa}/3)...")
+                time.sleep(espera)
+
+        if not sucesso_pagina:
+            print("[!] [ETL Extract] Não foi possível concluir a página complementar de KEV. Prosseguindo com lote principal.")
+            break
+
+    return kev_vulns
+
+
+def extrair_scores_epss(cve_ids, chunk_size=100, timeout=15):
+    """
+    Consulta em lote a API pública gratuita do FIRST.org EPSS (Exploit Prediction Scoring System)
+    retornando probabilidade de exploração em 30 dias (epss) e percentil para cada CVE.
+    """
+    ids_unicos = [str(c).strip() for c in dict.fromkeys(cve_ids or []) if str(c).strip().startswith("CVE-")]
+    if not ids_unicos:
+        return {}
+
+    epss_url = "https://api.first.org/data/v1/epss"
+    mapa_epss = {}
+    falhas_consecutivas = 0
+    chunk_seguro = max(1, min(int(chunk_size), 100))
+    total_lotes = (len(ids_unicos) + chunk_seguro - 1) // chunk_seguro
+
+    print(f"[+] [EPSS Engine] Enriquecendo {len(ids_unicos):,} CVEs na API FIRST.org ({total_lotes} lotes)...")
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "CyberThreatIntel-Bot/2.0 (EPSS Enrichment)"})
+
+    try:
+        for i in range(0, len(ids_unicos), chunk_seguro):
+            lote_ids = ids_unicos[i:i + chunk_seguro]
+            try:
+                res = session.get(
+                    epss_url,
+                    params={"cve": ",".join(lote_ids)},
+                    timeout=timeout
+                )
+                if res.status_code != 200:
+                    falhas_consecutivas += 1
+                    if falhas_consecutivas >= 3:
+                        print("[!] [EPSS Engine] API FIRST.org indisponível no momento. Seguindo com scores parciais.")
+                        break
+                    continue
+
+                falhas_consecutivas = 0
+                dados = res.json().get("data", [])
+                for item in dados:
+                    cve_id = item.get("cve")
+                    if not cve_id:
+                        continue
+                    try:
+                        score = max(0.0, min(1.0, float(item.get("epss", 0.0))))
+                        percentile = max(0.0, min(1.0, float(item.get("percentile", 0.0))))
+                        mapa_epss[cve_id] = {
+                            "epss": round(score, 5),
+                            "percentile": round(percentile, 5)
+                        }
+                    except (TypeError, ValueError):
+                        continue
+            except requests.exceptions.RequestException:
+                falhas_consecutivas += 1
+                if falhas_consecutivas >= 3:
+                    print("[!] [EPSS Engine] Timeout/rede ao consultar FIRST.org. Prosseguindo sem bloquear o ETL.")
+                    break
+    finally:
+        session.close()
+
+    print(f"[+] [EPSS Engine] Enriquecimento concluído: {len(mapa_epss):,} CVEs com probabilidade EPSS mapeada.")
+    return mapa_epss
+
+
+def extrair_dados_nist(
+    total_desejado=10000,
+    max_por_pagina=2000,
+    buscar_mais_recentes=True,
+    janela_dias=None,
+    incluir_catalogo_kev=True
+):
     """
     Extrai vulnerabilidades (CVEs) da API v2.0 do NIST NVD utilizando:
     - Descoberta inteligente do final do catálogo (totalResults - total_desejado) ou filtro
@@ -188,11 +309,30 @@ def extrair_dados_nist(total_desejado=10000, max_por_pagina=2000, buscar_mais_re
             if len(todas_vulnerabilidades) < total_desejado:
                 time.sleep(delay_requisicao)
 
+        # Limita o lote sequencial ao total desejado antes de mesclar o catálogo complementar CISA KEV
+        todas_vulnerabilidades = todas_vulnerabilidades[:total_desejado]
+
+        if incluir_catalogo_kev and buscar_mais_recentes and not date_params and len(todas_vulnerabilidades) > 0:
+            time.sleep(delay_requisicao)
+            kev_vulns = _extrair_catalogo_kev_nist(session, base_url, delay_requisicao)
+            if kev_vulns:
+                ids_presentes = {
+                    v.get("cve", {}).get("id")
+                    for v in todas_vulnerabilidades
+                    if isinstance(v, dict) and v.get("cve", {}).get("id")
+                }
+                novos_kev = 0
+                for kv in kev_vulns:
+                    kid = kv.get("cve", {}).get("id") if isinstance(kv, dict) else None
+                    if kid and kid not in ids_presentes:
+                        todas_vulnerabilidades.append(kv)
+                        ids_presentes.add(kid)
+                        novos_kev += 1
+                print(f"[+] [ETL Extract] Mesclagem KEV concluída: +{novos_kev:,} CVEs KEV históricas incorporadas ao dataset.")
+
     finally:
         session.close()
 
-    # Limita rigorosamente ao total desejado
-    todas_vulnerabilidades = todas_vulnerabilidades[:total_desejado]
     print(f"\n[+] [ETL Extract] Extração finalizada com sucesso! Total consolidado: {len(todas_vulnerabilidades):,} CVEs.\n")
 
     return {"vulnerabilities": todas_vulnerabilidades}

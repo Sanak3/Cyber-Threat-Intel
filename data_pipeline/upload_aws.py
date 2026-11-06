@@ -5,7 +5,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 
-from extract import extrair_dados_nist
+from extract import extrair_dados_nist, extrair_scores_epss
 from transform import transformar_dados
 
 # Carrega as variáveis de ambiente do .env na raiz do projeto
@@ -54,14 +54,22 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
     print("      CYBER THREAT INTEL // PIPELINE ETL (NIST -> AWS RDS)       ")
     print("=" * 65)
 
-    # 1. Extração dos dados brutos com paginação
+    # 1. Extração dos dados brutos com paginação + catálogo complementar CISA KEV (?hasKev)
     dados_brutos = extrair_dados_nist(total_desejado=total_registros)
     if not dados_brutos or not dados_brutos.get("vulnerabilities"):
         print("[-] [ETL Load] Falha na extração de dados do NIST. Abortando carga.")
         return False
 
+    # 1.5. Enriquecimento probabilístico de exploração em 30 dias via FIRST.org EPSS
+    cves_extraidas = [
+        v.get("cve", {}).get("id")
+        for v in dados_brutos.get("vulnerabilities", [])
+        if isinstance(v, dict) and v.get("cve", {}).get("id")
+    ]
+    mapa_epss = extrair_scores_epss(cves_extraidas)
+
     # 2. Transformação e análise matemática com motor de ML
-    resultado_transform = transformar_dados(dados_brutos)
+    resultado_transform = transformar_dados(dados_brutos, mapa_epss=mapa_epss)
     if not resultado_transform:
         print("[-] [ETL Load] Nenhuma vulnerabilidade processada para upload.")
         return False
@@ -97,7 +105,9 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
             _limpar_nan(item.get("cwe")) or "NVD-CWE-noinfo",
             _limpar_nan(item.get("cpe_vendor")),
             _limpar_nan(item.get("cpe_product")),
-            bool(_limpar_nan(item.get("cisa_kev")) or False)
+            bool(_limpar_nan(item.get("cisa_kev")) or False),
+            float(_limpar_nan(item.get("epss_score")) or 0.0),
+            float(_limpar_nan(item.get("epss_percentile")) or 0.0)
         )
         for item in vulnerabilidades_unicas
     ]
@@ -134,6 +144,8 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
             cpe_vendor VARCHAR(100),
             cpe_product VARCHAR(100),
             cisa_kev BOOLEAN DEFAULT FALSE,
+            epss_score FLOAT DEFAULT 0.0,
+            epss_percentile FLOAT DEFAULT 0.0,
             data_extracao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         ALTER TABLE threats ADD COLUMN IF NOT EXISTS primitiva VARCHAR(50) DEFAULT 'GENERIC_VULN';
@@ -145,6 +157,8 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
         ALTER TABLE threats ADD COLUMN IF NOT EXISTS cpe_vendor VARCHAR(100);
         ALTER TABLE threats ADD COLUMN IF NOT EXISTS cpe_product VARCHAR(100);
         ALTER TABLE threats ADD COLUMN IF NOT EXISTS cisa_kev BOOLEAN DEFAULT FALSE;
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS epss_score FLOAT DEFAULT 0.0;
+        ALTER TABLE threats ADD COLUMN IF NOT EXISTS epss_percentile FLOAT DEFAULT 0.0;
 
         -- Tabela dedicada para Exploit Chains e Blueprints
         CREATE TABLE IF NOT EXISTS exploit_chains (
@@ -166,6 +180,7 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
         CREATE INDEX IF NOT EXISTS idx_threats_pub_date ON threats (data_publicacao DESC);
         CREATE INDEX IF NOT EXISTS idx_threats_cwe ON threats (cwe);
         CREATE INDEX IF NOT EXISTS idx_threats_cisa_kev ON threats (cisa_kev);
+        CREATE INDEX IF NOT EXISTS idx_threats_epss ON threats (epss_score DESC);
         CREATE INDEX IF NOT EXISTS idx_threats_severidade ON threats (severidade);
         CREATE INDEX IF NOT EXISTS idx_threats_tecnologia ON threats (tecnologia);
         CREATE INDEX IF NOT EXISTS idx_threats_cluster ON threats (cluster_label);
@@ -180,7 +195,8 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
         upsert_query = """
         INSERT INTO threats (
             cve_id, descricao, nota_cvss, severidade, primitiva, tecnologia, cluster_label,
-            data_publicacao, data_modificacao, cwe, cpe_vendor, cpe_product, cisa_kev
+            data_publicacao, data_modificacao, cwe, cpe_vendor, cpe_product, cisa_kev,
+            epss_score, epss_percentile
         )
         VALUES %s
         ON CONFLICT (cve_id) DO UPDATE SET
@@ -196,6 +212,8 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
             cpe_vendor = EXCLUDED.cpe_vendor,
             cpe_product = EXCLUDED.cpe_product,
             cisa_kev = EXCLUDED.cisa_kev,
+            epss_score = EXCLUDED.epss_score,
+            epss_percentile = EXCLUDED.epss_percentile,
             data_extracao = CURRENT_TIMESTAMP;
         """
 
