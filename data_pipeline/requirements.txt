@@ -1,8 +1,9 @@
-requests
-numpy
-python-dotenv
-psycopg2-binary
-pandas
-scikit-learn
-networkx
-joblib
+requests==2.32.3
+numpy>=1.26.4,<2.0.0
+python-dotenv==1.0.1
+psycopg2-binary==2.9.9
+pandas>=2.2.0,<3.0.0
+scikit-learn>=1.4.0,<1.6.0
+networkx>=3.2.1,<4.0.0
+joblib>=1.4.0,<2.0.0
+pytest>=8.2.0

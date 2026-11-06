@@ -12,6 +12,7 @@ on:
       - main
     paths:
       - 'data_pipeline/**'
+      - 'tests/**'
       - '.github/workflows/**'
 
 jobs:
@@ -33,6 +34,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r data_pipeline/requirements.txt
 
+      - name: Executar Testes Automatizados (Pytest)
+        run: |
+          pytest tests/ -v
+
       - name: Executar Pipeline ETL (10.000 Registros)
         env:
           NIST_API_KEY: ${{ secrets.NIST_API_KEY }}
@@ -41,5 +46,7 @@ jobs:
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_PORT: ${{ secrets.DB_PORT }}
+          API_URL: ${{ secrets.API_URL }}
+          INTERNAL_WEBHOOK_SECRET: ${{ secrets.INTERNAL_WEBHOOK_SECRET }}
         run: |
           python data_pipeline/upload_aws.py
