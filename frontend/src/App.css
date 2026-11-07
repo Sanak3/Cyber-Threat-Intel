@@ -1932,6 +1932,18 @@
   border-radius: 5px;
 }
 
+.writeup-epss-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  padding: 0.18rem 0.55rem;
+  border-radius: 5px;
+  letter-spacing: 0.4px;
+}
+
 .writeup-kev-alert {
   font-family: var(--font-mono);
   font-size: 0.65rem;
@@ -2203,12 +2215,31 @@
 .topology-node.primitive-border-auth_bypass { border-top-color: #f97316; }
 .topology-node.primitive-border-injection_rce { border-top-color: #ef4444; }
 .topology-node.primitive-border-priv_esc { border-top-color: #a855f7; }
+.topology-node.primitive-border-denial_of_service { border-top-color: #fbbf24; }
 
 .topology-node-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.4rem;
+}
+
+.topology-top-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.topology-mitre-id {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+  padding: 0.08rem 0.34rem;
+  border-radius: 3px;
+  background: rgba(99, 102, 241, 0.16);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.38);
+  letter-spacing: 0.3px;
 }
 
 .topology-step-num {
@@ -2353,6 +2384,7 @@
 .timeline-step-card.primitive-accent-auth_bypass { border-left-color: #f97316; }
 .timeline-step-card.primitive-accent-injection_rce { border-left-color: #ef4444; }
 .timeline-step-card.primitive-accent-priv_esc { border-left-color: #a855f7; }
+.timeline-step-card.primitive-accent-denial_of_service { border-left-color: #fbbf24; }
 
 .step-card-top {
   display: flex;
@@ -2405,6 +2437,32 @@
   font-weight: 700;
   padding: 0.14rem 0.46rem;
   border-radius: 4px;
+}
+
+.step-mitre-pill {
+  font-family: var(--font-mono);
+  font-size: 0.63rem;
+  font-weight: 700;
+  padding: 0.14rem 0.48rem;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.14);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.36);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  transition: all 0.2s ease;
+}
+
+.step-mitre-pill:hover,
+.step-mitre-pill:focus-visible {
+  background: rgba(99, 102, 241, 0.28);
+  border-color: #818cf8;
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.35);
+  transform: translateY(-1px);
+  outline: none;
 }
 
 .step-cvss-pill {
@@ -3500,6 +3558,12 @@
 
   .timeline-step-card {
     padding: 0.8rem 0.9rem;
+  }
+
+  .step-mitre-pill,
+  .writeup-epss-tag {
+    font-size: 0.6rem;
+    padding: 0.12rem 0.42rem;
   }
 }
 

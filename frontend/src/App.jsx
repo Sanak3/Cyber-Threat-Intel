@@ -97,6 +97,73 @@ const obterPapelPasso = (idx, total) => {
   return 'Pivoting Tático'
 }
 
+const MITRE_FALLBACK_PRIMITIVE = {
+  RECON_INFO_LEAK: {
+    tactic_id: 'TA0001',
+    tactic: 'Initial Access',
+    technique_id: 'T1190',
+    technique: 'Exploit Public-Facing Application'
+  },
+  AUTH_BYPASS: {
+    tactic_id: 'TA0006',
+    tactic: 'Credential Access',
+    technique_id: 'T1078',
+    technique: 'Valid Accounts / Auth Bypass'
+  },
+  INJECTION_RCE: {
+    tactic_id: 'TA0002',
+    tactic: 'Execution',
+    technique_id: 'T1059',
+    technique: 'Command and Scripting Interpreter'
+  },
+  PRIV_ESC: {
+    tactic_id: 'TA0004',
+    tactic: 'Privilege Escalation',
+    technique_id: 'T1068',
+    technique: 'Exploitation for Privilege Escalation'
+  },
+  DENIAL_OF_SERVICE: {
+    tactic_id: 'TA0040',
+    tactic: 'Impact',
+    technique_id: 'T1499',
+    technique: 'Endpoint Denial of Service'
+  },
+  GENERIC_VULN: {
+    tactic_id: 'TA0001',
+    tactic: 'Initial Access',
+    technique_id: 'T1190',
+    technique: 'Exploit Public-Facing Application'
+  }
+}
+
+const MITRE_FALLBACK_CWE = {
+  'CWE-22': { tactic_id: 'TA0009', tactic: 'Collection', technique_id: 'T1005', technique: 'Data from Local System' },
+  'CWE-200': { tactic_id: 'TA0009', tactic: 'Collection', technique_id: 'T1005', technique: 'Data from Local System' },
+  'CWE-532': { tactic_id: 'TA0006', tactic: 'Credential Access', technique_id: 'T1552', technique: 'Unsecured Credentials' },
+  'CWE-798': { tactic_id: 'TA0006', tactic: 'Credential Access', technique_id: 'T1552', technique: 'Unsecured Credentials' },
+  'CWE-89': { tactic_id: 'TA0001', tactic: 'Initial Access', technique_id: 'T1190', technique: 'Exploit Public-Facing Application' },
+  'CWE-918': { tactic_id: 'TA0001', tactic: 'Initial Access', technique_id: 'T1190', technique: 'Exploit Public-Facing Application' },
+  'CWE-502': { tactic_id: 'TA0002', tactic: 'Execution', technique_id: 'T1203', technique: 'Exploitation for Client/Server Execution' },
+  'CWE-79': { tactic_id: 'TA0002', tactic: 'Execution', technique_id: 'T1059.007', technique: 'JavaScript Execution' }
+}
+
+const obterMitrePasso = (passo) => {
+  if (passo?.mitre_attack?.technique_id) {
+    return passo.mitre_attack
+  }
+  const cweKey = String(passo?.cwe || '').trim().toUpperCase()
+  if (MITRE_FALLBACK_CWE[cweKey]) {
+    return MITRE_FALLBACK_CWE[cweKey]
+  }
+  return MITRE_FALLBACK_PRIMITIVE[passo?.primitiva] || MITRE_FALLBACK_PRIMITIVE.GENERIC_VULN
+}
+
+const obterUrlMitreTechnique = (techniqueId) => {
+  const bruto = String(techniqueId || '').trim()
+  const validado = /^T\d{4}(?:\.\d{3})?$/i.test(bruto) ? bruto.toUpperCase() : 'T1190'
+  return `https://attack.mitre.org/techniques/${validado.replace('.', '/')}/`
+}
+
 const formatarEpssPercent = (val) => {
   const num = Number(val)
   if (!Number.isFinite(num) || num <= 0) return null
@@ -271,7 +338,10 @@ function App() {
         c.tecnologia,
         ...(c.cves || []),
         c.writeup?.titulo,
-        ...(c.writeup?.passos_ataque || []).flatMap((p) => [p.primitiva, p.cwe, p.acao])
+        ...(c.writeup?.passos_ataque || []).flatMap((p) => {
+          const mitre = obterMitrePasso(p)
+          return [p.primitiva, p.cwe, p.acao, mitre.tactic_id, mitre.tactic, mitre.technique_id, mitre.technique]
+        })
       ]
         .filter(Boolean)
         .join(' ')
@@ -295,8 +365,13 @@ function App() {
     const scorePct = Math.min(100, Math.max(10, Math.round(scoreVal * 10)))
     const isHigh = activeChain.severidade === 'HIGH'
     const temKevAtivo = chainTemKev(activeChain)
+    const maxEpssVal = Math.max(
+      Number(activeChain.writeup.max_epss || 0),
+      ...passos.map((p) => Number(p.epss_score || 0))
+    )
+    const maxEpssFmt = formatarEpssPercent(maxEpssVal)
     const { textoPrincipal, alertaSoc } = separarResumoEAlertaKev(activeChain.writeup.resumo_executivo)
-    return { passos, scoreVal, scorePct, isHigh, temKevAtivo, textoPrincipal, alertaSoc }
+    return { passos, scoreVal, scorePct, isHigh, temKevAtivo, maxEpssFmt, textoPrincipal, alertaSoc }
   }, [activeChain])
 
   const selecionarChainCard = (chainId) => {
@@ -453,13 +528,17 @@ function App() {
     const w = chain.writeup
     const passosMd = (w.passos_ataque || [])
       .map((p) => {
+        const mitre = obterMitrePasso(p)
+        const epssFmt = formatarEpssPercent(p.epss_score)
         const tags = [
           p.primitiva,
+          `${mitre.technique_id} (${mitre.tactic})`,
           p.nota_cvss ? `CVSS ${Number(p.nota_cvss).toFixed(1)}` : null,
+          epssFmt ? `EPSS ${epssFmt}` : null,
           p.cwe && p.cwe !== 'NVD-CWE-noinfo' ? p.cwe : null,
           p.cisa_kev ? 'CISA KEV' : null
         ].filter(Boolean).join(' | ')
-        return `### Passo ${p.passo}: ${p.cve_id} (${tags})\n- **Ação:** ${p.acao}\n- **Detalhe:** ${p.detalhe}`
+        return `### Passo ${p.passo}: ${p.cve_id} (${tags})\n- **MITRE ATT&CK:** ${mitre.tactic_id} - ${mitre.tactic} / ${mitre.technique_id} - ${mitre.technique}\n- **Ação:** ${p.acao}\n- **Detalhe:** ${p.detalhe}`
       })
       .join('\n\n')
 
@@ -467,11 +546,19 @@ function App() {
       .map((m) => `- ${m}`)
       .join('\n')
 
+    const taticasChain = Array.from(
+      new Set((w.passos_ataque || []).map((p) => {
+        const m = obterMitrePasso(p)
+        return `${m.tactic_id} (${m.technique_id})`
+      }))
+    )
+
     const markdown = [
       `# ${w.titulo}`,
       `- **Chain ID:** ${chain.chain_id}`,
       `- **Alvo / Ecossistema:** ${chain.tecnologia}`,
       `- **Score Composto:** ${Number(chain.score_cvss || 10.0).toFixed(1)} (${chain.severidade})`,
+      taticasChain.length ? `- **MITRE ATT&CK:** ${taticasChain.join(' -> ')}` : null,
       `- **Fluxo de CVEs:** ${(chain.cves || []).join(' -> ')}`,
       '',
       '## Resumo Executivo',
@@ -485,7 +572,7 @@ function App() {
       '',
       '## Mitigações Recomendadas pelo SOC',
       mitigacoesMd
-    ].join('\n')
+    ].filter((l) => l !== null).join('\n')
 
     try {
       await navigator.clipboard.writeText(markdown)
@@ -1871,7 +1958,7 @@ function App() {
                   <input
                     type="text"
                     className="chains-search-input"
-                    placeholder="Filtrar cadeias por CVE, ecossistema, CWE ou primitiva..."
+                    placeholder="Filtrar cadeias por CVE, MITRE (ex: T1190), ecossistema, CWE ou primitiva..."
                     value={buscaChain}
                     onChange={(e) => setBuscaChain(e.target.value)}
                   />
@@ -2043,6 +2130,14 @@ function App() {
                           <span className="writeup-elos-tag">
                             {activeChain.writeup.elos_count || activeBlueprintMeta.passos.length} Elos Encadeados
                           </span>
+                          {activeBlueprintMeta.maxEpssFmt && (
+                            <span
+                              className="writeup-epss-tag"
+                              title="Maior probabilidade EPSS (FIRST.org) entre os elos da cadeia"
+                            >
+                              EPSS MÁX {activeBlueprintMeta.maxEpssFmt}
+                            </span>
+                          )}
                           {activeBlueprintMeta.temKevAtivo && (
                             <span className="writeup-kev-alert">CISA KEV ACTIVE</span>
                           )}
@@ -2099,36 +2194,44 @@ function App() {
                         </div>
 
                         <div className="killchain-topology-track">
-                          {activeBlueprintMeta.passos.map((passo, idx) => (
-                            <Fragment key={`topo-${passo.cve_id}-${idx}`}>
-                              <div className={`topology-node primitive-border-${String(passo.primitiva || '').toLowerCase()}`}>
-                                <div className="topology-node-top">
-                                  <span className="topology-step-num">ELO 0{passo.passo || idx + 1}</span>
-                                  {Number(passo.nota_cvss) > 0 && (
-                                    <span className={`topology-cvss ${getScoreClass(passo.nota_cvss)}`}>
-                                      {Number(passo.nota_cvss).toFixed(1)}
+                          {activeBlueprintMeta.passos.map((passo, idx) => {
+                            const mitreTopo = obterMitrePasso(passo)
+                            return (
+                              <Fragment key={`topo-${passo.cve_id}-${idx}`}>
+                                <div className={`topology-node primitive-border-${String(passo.primitiva || '').toLowerCase()}`}>
+                                  <div className="topology-node-top">
+                                    <span className="topology-step-num">ELO 0{passo.passo || idx + 1}</span>
+                                    <div className="topology-top-pills">
+                                      <span className="topology-mitre-id" title={`${mitreTopo.tactic}: ${mitreTopo.technique}`}>
+                                        {mitreTopo.technique_id}
+                                      </span>
+                                      {Number(passo.nota_cvss) > 0 && (
+                                        <span className={`topology-cvss ${getScoreClass(passo.nota_cvss)}`}>
+                                          {Number(passo.nota_cvss).toFixed(1)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="topology-cve-id">{passo.cve_id}</div>
+                                  <div className="topology-prim-row">
+                                    <span className={`step-primitive-pill primitive-${String(passo.primitiva || '').toLowerCase()}`}>
+                                      {formatarPrimitivaLabel(passo.primitiva)}
                                     </span>
-                                  )}
+                                    {passo.cisa_kev && (
+                                      <span className="topology-kev-dot" title="CISA KEV">KEV</span>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="topology-cve-id">{passo.cve_id}</div>
-                                <div className="topology-prim-row">
-                                  <span className={`step-primitive-pill primitive-${String(passo.primitiva || '').toLowerCase()}`}>
-                                    {formatarPrimitivaLabel(passo.primitiva)}
-                                  </span>
-                                  {passo.cisa_kev && (
-                                    <span className="topology-kev-dot" title="CISA KEV">KEV</span>
-                                  )}
-                                </div>
-                              </div>
 
-                              {idx < activeBlueprintMeta.passos.length - 1 && (
-                                <div className="topology-connector" aria-hidden="true">
-                                  <span className="topology-connector-line" />
-                                  <span className="topology-connector-arrow">▶</span>
-                                </div>
-                              )}
-                            </Fragment>
-                          ))}
+                                {idx < activeBlueprintMeta.passos.length - 1 && (
+                                  <div className="topology-connector" aria-hidden="true">
+                                    <span className="topology-connector-line" />
+                                    <span className="topology-connector-arrow">▶</span>
+                                  </div>
+                                )}
+                              </Fragment>
+                            )
+                          })}
                         </div>
                       </div>
                     )}
@@ -2145,6 +2248,8 @@ function App() {
                           const ultimoPasso = idx === activeBlueprintMeta.passos.length - 1
                           const cweValido = passo.cwe && passo.cwe !== 'NVD-CWE-noinfo' && passo.cwe !== 'NVD-CWE-Other'
                           const primSlug = String(passo.primitiva || '').toLowerCase()
+                          const mitrePasso = obterMitrePasso(passo)
+                          const epssPassoFmt = formatarEpssPercent(passo.epss_score)
 
                           return (
                             <div key={`step-${passo.cve_id}-${idx}`} className="timeline-item">
@@ -2177,8 +2282,26 @@ function App() {
                                     >
                                       {formatarPrimitivaLabel(passo.primitiva)}
                                     </span>
+                                    <a
+                                      href={obterUrlMitreTechnique(mitrePasso.technique_id)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="step-mitre-pill"
+                                      title={`MITRE ATT&CK ${mitrePasso.tactic_id} (${mitrePasso.tactic}) — ${mitrePasso.technique_id}: ${mitrePasso.technique}`}
+                                    >
+                                      <span>{mitrePasso.technique_id} · {mitrePasso.tactic}</span>
+                                      <span>↗</span>
+                                    </a>
                                     {cweValido && (
                                       <span className="cve-cwe-tag">{passo.cwe}</span>
+                                    )}
+                                    {epssPassoFmt && (
+                                      <span
+                                        className={`cve-epss-tag ${Number(passo.epss_score) >= 0.1 ? 'is-high-epss' : ''}`}
+                                        title={`Probabilidade EPSS FIRST.org em 30 dias: ${epssPassoFmt}`}
+                                      >
+                                        EPSS {epssPassoFmt}
+                                      </span>
                                     )}
                                     {passo.cisa_kev && (
                                       <span className="cve-kev-tag" title="Exploração ativa confirmada no catálogo CISA KEV">
