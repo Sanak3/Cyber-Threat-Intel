@@ -3602,5 +3602,426 @@
   }
 }
 
+/* ==============================================================================
+   REFINAMENTOS INTERATIVOS SOC (ATALHOS, ACCORDION DESKTOP, PÍLULAS & AÇÕES)
+   ============================================================================== */
+
+body.soc-modal-open {
+  overflow: hidden;
+}
+
+/* Tooltip do Gráfico de Severidade */
+.tooltip-pct {
+  font-weight: 600 !important;
+  color: var(--electric-cyan) !important;
+  font-size: 0.75rem;
+}
+
+.tooltip-hint {
+  margin-top: 0.35rem;
+  padding-top: 0.3rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+/* KPIs Clicáveis & Mini-Pílulas de Telemetria */
+.kpi-interactive {
+  cursor: pointer;
+  user-select: none;
+}
+
+.kpi-interactive:focus-visible {
+  outline: 2px solid var(--electric-cyan);
+  outline-offset: 2px;
+}
+
+.kpi-card.kpi-critical.is-kpi-active {
+  border-color: var(--critical-red);
+  box-shadow: 0 8px 28px rgba(255, 0, 85, 0.22), inset 0 0 0 1px rgba(255, 0, 85, 0.35);
+}
+
+.kpi-card.kpi-high.is-kpi-active {
+  border-color: var(--high-orange);
+  box-shadow: 0 8px 28px rgba(255, 153, 0, 0.22), inset 0 0 0 1px rgba(255, 153, 0, 0.35);
+}
+
+.kpi-mini-pill {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 700;
+  padding: 0.12rem 0.44rem;
+  border-radius: 999px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.pill-kev-mini {
+  background: rgba(255, 0, 85, 0.16);
+  color: #ff6b8b;
+  border: 1px solid rgba(255, 0, 85, 0.4);
+}
+
+.pill-crit-mini {
+  background: rgba(255, 0, 85, 0.12);
+  color: var(--critical-red);
+  border: 1px solid rgba(255, 0, 85, 0.3);
+}
+
+.pill-high-mini {
+  background: rgba(255, 153, 0, 0.12);
+  color: var(--high-orange);
+  border: 1px solid rgba(255, 153, 0, 0.3);
+}
+
+.pill-avg-mini {
+  background: rgba(0, 212, 255, 0.1);
+  color: var(--electric-cyan);
+  border: 1px solid rgba(0, 212, 255, 0.26);
+}
+
+/* Atalho de Teclado no Terminal de Busca & Pílula EPSS */
+.terminal-kbd-hint {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
+  background: rgba(30, 41, 59, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 0.1rem 0.45rem;
+  margin-left: 0.5rem;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.search-terminal-box:focus-within .terminal-kbd-hint {
+  color: var(--neon-green);
+  border-color: rgba(0, 255, 136, 0.35);
+}
+
+.filter-pill.pill-epss {
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.filter-pill.active.pill-epss {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.28);
+}
+
+/* Barra Sutil de Progresso na Tabela Paginada */
+.table-responsive {
+  position: relative;
+}
+
+.table-responsive.is-fetching .soc-table tbody {
+  opacity: 0.72;
+  transition: opacity 0.18s ease;
+}
+
+.table-loading-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 5;
+  background: linear-gradient(90deg, transparent, var(--electric-cyan), var(--neon-green), transparent);
+  background-size: 200% 100%;
+  animation: cyberLoadingSlide 1.15s linear infinite;
+}
+
+@keyframes cyberLoadingSlide {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Botão Inline de Cópia de CVE & Indicador de Expansão Desktop */
+.btn-copy-cve-inline {
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1;
+  padding: 0.2rem 0.36rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  flex-shrink: 0;
+}
+
+.btn-copy-cve-inline:hover {
+  border-color: var(--electric-cyan);
+  color: #ffffff;
+  background: rgba(0, 212, 255, 0.16);
+}
+
+.btn-copy-cve-inline.is-copied {
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+  background: rgba(0, 255, 136, 0.14);
+}
+
+.desktop-row-chevron {
+  font-size: 0.7rem;
+  color: #64748b;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+
+.soc-table tbody tr:hover .desktop-row-chevron,
+.soc-table tbody tr.is-expanded .desktop-row-chevron {
+  opacity: 1;
+  color: var(--electric-cyan);
+}
+
+@media (min-width: 769px) {
+  .soc-table tbody tr.threat-row {
+    cursor: pointer;
+  }
+
+  .soc-table tbody tr.is-collapsed .cve-desc-body {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .soc-table tbody tr.is-expanded {
+    background-color: rgba(0, 212, 255, 0.045);
+  }
+
+  .soc-table tbody tr.is-expanded .cve-expanded-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .desktop-row-chevron,
+  .terminal-kbd-hint {
+    display: none;
+  }
+
+  .soc-table tbody tr.is-expanded .cve-expanded-actions {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+}
+
+/* Tags Interativas de Pivoting na Tabela */
+.cve-ml-tags .tag-interactive {
+  cursor: pointer;
+  transition: all 0.16s ease;
+  line-height: 1.25;
+}
+
+.cve-ml-tags .tag-interactive:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.18);
+  color: #ffffff;
+}
+
+.cve-ml-tags .tag-interactive.is-tag-active {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45), 0 0 10px rgba(0, 212, 255, 0.28);
+  color: #ffffff;
+}
+
+.cve-chain-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.18);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.48);
+  letter-spacing: 0.4px;
+}
+
+.cve-chain-tag:hover {
+  background: rgba(168, 85, 247, 0.32);
+  border-color: #a855f7;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.35);
+}
+
+/* Barra de Ações Expandidas por Linha & Reset de Empty State */
+.btn-action-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.38rem 0.72rem;
+  border-radius: 6px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.btn-action-secondary:hover {
+  border-color: var(--electric-cyan);
+  color: #ffffff;
+  background: rgba(0, 212, 255, 0.14);
+}
+
+.btn-action-secondary.is-copied {
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+  background: rgba(0, 255, 136, 0.14);
+}
+
+.btn-action-secondary.btn-mitre-action {
+  border-color: rgba(99, 102, 241, 0.38);
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.btn-action-secondary.btn-mitre-action:hover {
+  border-color: #818cf8;
+  color: #ffffff;
+  background: rgba(99, 102, 241, 0.25);
+}
+
+.btn-action-secondary.btn-chain-action {
+  border-color: rgba(168, 85, 247, 0.45);
+  color: #d8b4fe;
+  background: rgba(168, 85, 247, 0.14);
+}
+
+.btn-action-secondary.btn-chain-action:hover {
+  border-color: #a855f7;
+  color: #ffffff;
+  background: rgba(168, 85, 247, 0.28);
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.28);
+}
+
+.btn-empty-reset {
+  margin-top: 1rem;
+  background: rgba(0, 212, 255, 0.12);
+  border: 1px solid rgba(0, 212, 255, 0.38);
+  color: var(--electric-cyan);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.45rem 0.95rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-empty-reset:hover {
+  background: rgba(0, 212, 255, 0.24);
+  border-color: var(--electric-cyan);
+  color: #ffffff;
+  box-shadow: 0 0 12px var(--electric-cyan-glow);
+}
+
+/* Rodapé com Botão de Ressincronização Manual */
+.footer-sync-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.btn-footer-sync {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border-muted);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.24rem 0.6rem;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.btn-footer-sync:hover:not(:disabled) {
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+  background: rgba(0, 255, 136, 0.08);
+}
+
+.btn-footer-sync:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+/* Refinamentos do Modal de Exploit Chains */
+.writeup-actions-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.btn-export-chain-json {
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.38);
+  color: #d8b4fe;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.32rem 0.68rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-export-chain-json:hover {
+  background: rgba(168, 85, 247, 0.26);
+  border-color: #a855f7;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.28);
+}
+
+.topology-node-clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.topology-node-clickable:focus-visible,
+.topology-node.is-node-active {
+  border-color: var(--electric-cyan);
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.28);
+  outline: none;
+}
+
+.timeline-step-card.is-step-highlighted {
+  border-color: var(--electric-cyan);
+  background: rgba(0, 212, 255, 0.09);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.22);
+}
+
+.cwe-link-tag {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  transition: all 0.18s ease;
+}
+
+.cwe-link-tag:hover {
+  background: rgba(0, 212, 255, 0.22);
+  border-color: var(--electric-cyan);
+  color: #ffffff;
+}
+
+
 
 

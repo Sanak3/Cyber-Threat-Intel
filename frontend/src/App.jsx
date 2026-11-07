@@ -23,6 +23,12 @@ const CustomSeverityTooltip = ({ active, payload }) => {
         </div>
         <div className="tooltip-value">
           Total de Ameaças: <span>{Number(data.valor).toLocaleString('pt-BR')}</span>
+          {data.percentual !== undefined && (
+            <span className="tooltip-pct"> ({data.percentual}%)</span>
+          )}
+        </div>
+        <div className="tooltip-hint">
+          {data.ativa ? '✓ Filtro ativo — clique para limpar' : 'Clique na barra para filtrar o feed'}
         </div>
       </div>
     )
@@ -164,6 +170,12 @@ const obterUrlMitreTechnique = (techniqueId) => {
   return `https://attack.mitre.org/techniques/${validado.replace('.', '/')}/`
 }
 
+const obterUrlMitreCwe = (cweStr) => {
+  const match = String(cweStr || '').trim().match(/^CWE-(\d+)$/i)
+  if (!match) return null
+  return `https://cwe.mitre.org/data/definitions/${match[1]}.html`
+}
+
 const formatarEpssPercent = (val) => {
   const num = Number(val)
   if (!Number.isFinite(num) || num <= 0) return null
@@ -280,6 +292,7 @@ function App() {
   const [debouncedBusca, setDebouncedBusca] = useState('')
   const [filtroSeveridade, setFiltroSeveridade] = useState('TODOS')
   const [filtroKev, setFiltroKev] = useState(false)
+  const [filtroEpssAlto, setFiltroEpssAlto] = useState(false)
   const [filtroPrimitiva, setFiltroPrimitiva] = useState('TODOS')
   const [filtroCluster, setFiltroCluster] = useState('TODOS')
   const [filtroTecnologia, setFiltroTecnologia] = useState('TODOS')
@@ -292,11 +305,14 @@ function App() {
     return 25
   })
 
-  // 4. Estados de Usabilidade e Navegação Mobile
+  // 4. Estados de Usabilidade, Atalhos e Navegação Mobile
   const [expandedCves, setExpandedCves] = useState({})
+  const [copiadoCveId, setCopiadoCveId] = useState(null)
   const [mostrarGraficosMobile, setMostrarGraficosMobile] = useState(true)
   const [mostrarVoltarTopo, setMostrarVoltarTopo] = useState(false)
+  const [refreshTick, setRefreshTick] = useState(0)
   const threatTableRef = useRef(null)
+  const searchInputRef = useRef(null)
 
   // Estados e controle do Modal de Exploit Chains
   const [modalChainsAberto, setModalChainsAberto] = useState(false)
@@ -304,7 +320,21 @@ function App() {
   const [filtroKevChain, setFiltroKevChain] = useState(false)
   const [buscaChain, setBuscaChain] = useState('')
   const [copiadoWriteup, setCopiadoWriteup] = useState(false)
+  const [highlightedStepIdx, setHighlightedStepIdx] = useState(null)
   const detailPanelRef = useRef(null)
+
+  // Índice rápido CVE -> Exploit Chain para correlação direta na tabela
+  const cveParaChainMap = useMemo(() => {
+    const mapa = new Map()
+    exploitChains.forEach((chain) => {
+      ;(chain.cves || []).forEach((cveId) => {
+        if (cveId && !mapa.has(cveId)) {
+          mapa.set(cveId, chain)
+        }
+      })
+    })
+    return mapa
+  }, [exploitChains])
 
   const ecossistemasDisponiveis = useMemo(() => {
     const setEcos = new Set()
@@ -377,6 +407,7 @@ function App() {
   const selecionarChainCard = (chainId) => {
     setSelectedChainId(chainId)
     setCopiadoWriteup(false)
+    setHighlightedStepIdx(null)
     if (detailPanelRef.current) {
       detailPanelRef.current.scrollTo({ top: 0, behavior: 'smooth' })
     }
@@ -423,11 +454,48 @@ function App() {
     }
   }
 
+  const abrirChainEspecifica = (chain) => {
+    if (!chain) return
+    setFiltroEcoChain('TODOS')
+    setFiltroKevChain(false)
+    setBuscaChain('')
+    setCopiadoWriteup(false)
+    setHighlightedStepIdx(null)
+    setSelectedChainId(chain.chain_id)
+    setModalChainsAberto(true)
+  }
+
+  const focarPassoTimeline = (idx) => {
+    setHighlightedStepIdx(idx)
+    const el = document.getElementById(`chain-step-${idx}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+    setTimeout(() => {
+      setHighlightedStepIdx((atual) => (atual === idx ? null : atual))
+    }, 1500)
+  }
+
+  const copiarIdCve = async (e, cveId) => {
+    if (e) e.stopPropagation()
+    if (!cveId) return
+    try {
+      await navigator.clipboard.writeText(cveId)
+      setCopiadoCveId(cveId)
+      setTimeout(() => {
+        setCopiadoCveId((atual) => (atual === cveId ? null : atual))
+      }, 1500)
+    } catch {
+      // fallback silencioso em contextos sem permissão de clipboard
+    }
+  }
+
   const inspecionarCveNoFeed = (cveId) => {
     if (!cveId) return
     setModalChainsAberto(false)
     setFiltroSeveridade('TODOS')
     setFiltroKev(false)
+    setFiltroEpssAlto(false)
     setFiltroPrimitiva('TODOS')
     setFiltroCluster('TODOS')
     setFiltroTecnologia('TODOS')
@@ -450,6 +518,26 @@ function App() {
       const topOffset = threatTableRef.current.getBoundingClientRect().top + window.scrollY - 20
       window.scrollTo({ top: topOffset, behavior: 'smooth' })
     }
+  }
+
+  const alternarSeveridadeNoFeed = (sevKey, scrollFeed = false) => {
+    if (!sevKey) return
+    const proximo = filtroSeveridade === sevKey ? 'TODOS' : sevKey
+    setFiltroSeveridade(proximo)
+    setPaginaAtual(1)
+    if (scrollFeed && proximo !== 'TODOS' && threatTableRef.current) {
+      const topOffset = threatTableRef.current.getBoundingClientRect().top + window.scrollY - 20
+      window.scrollTo({ top: topOffset, behavior: 'smooth' })
+    }
+  }
+
+  const alternarOrdenacaoColuna = (modoAlvo) => {
+    setOrdenacao((atual) => (atual === modoAlvo ? 'cvss_desc' : modoAlvo))
+    setPaginaAtual(1)
+  }
+
+  const forcarSincronizacao = () => {
+    setRefreshTick((prev) => prev + 1)
   }
 
   const dispararDownloadArquivo = (conteudo, nomeArquivo, mimeType) => {
@@ -508,6 +596,7 @@ function App() {
         search: debouncedBusca || null,
         severity: filtroSeveridade,
         cisa_kev_only: filtroKev,
+        high_epss_only: filtroEpssAlto,
         primitive: filtroPrimitiva,
         cluster: filtroCluster,
         technology: filtroTecnologia,
@@ -519,6 +608,32 @@ function App() {
     dispararDownloadArquivo(
       JSON.stringify(payload, null, 2),
       `cti-threats-p${paginaAtual}-${stamp}.json`,
+      'application/json;charset=utf-8;'
+    )
+  }
+
+  const exportarChainJson = (chain) => {
+    if (!chain?.writeup) return
+    const passosEnriquecidos = (chain.writeup.passos_ataque || []).map((p) => ({
+      ...p,
+      mitre_attack: obterMitrePasso(p)
+    }))
+    const payload = {
+      exported_at: new Date().toISOString(),
+      chain_id: chain.chain_id,
+      target_ecosystem: chain.tecnologia,
+      severity: chain.severidade,
+      composite_cvss: Number(chain.score_cvss || 10.0),
+      cves: chain.cves || [],
+      blueprint: {
+        ...chain.writeup,
+        passos_ataque: passosEnriquecidos
+      }
+    }
+    const slug = String(chain.chain_id || 'chain').toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+    dispararDownloadArquivo(
+      JSON.stringify(payload, null, 2),
+      `cti-blueprint-${slug}.json`,
       'application/json;charset=utf-8;'
     )
   }
@@ -583,24 +698,71 @@ function App() {
     }
   }
 
-  // Listener para fechar o modal com a tecla ESC e travar scroll do fundo
+  // Listener para fechar o modal com ESC, navegar cadeias com ↑/↓ e travar scroll do fundo
   useEffect(() => {
     if (!modalChainsAberto) return undefined
 
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    document.body.classList.add('soc-modal-open')
 
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setModalChainsAberto(false)
+        return
+      }
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && chainsFiltradas.length > 0) {
+        const tag = e.target?.tagName?.toLowerCase()
+        if (tag !== 'input' && tag !== 'textarea') {
+          e.preventDefault()
+          const idRef = activeChain?.chain_id || selectedChainId
+          const idxAtual = chainsFiltradas.findIndex((c) => c.chain_id === idRef)
+          const delta = e.key === 'ArrowDown' ? 1 : -1
+          const proximoIdx = idxAtual === -1 ? 0 : (idxAtual + delta + chainsFiltradas.length) % chainsFiltradas.length
+          const proximaChain = chainsFiltradas[proximoIdx]
+          if (proximaChain) {
+            setSelectedChainId(proximaChain.chain_id)
+            setCopiadoWriteup(false)
+            setHighlightedStepIdx(null)
+            if (detailPanelRef.current) {
+              detailPanelRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+            }
+          }
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
 
     return () => {
-      document.body.style.overflow = prevOverflow
+      document.body.classList.remove('soc-modal-open')
       window.removeEventListener('keydown', handleKeyDown)
     }
+  }, [modalChainsAberto, chainsFiltradas, activeChain, selectedChainId])
+
+  // Atalho global '/' ou Ctrl+K / Cmd+K para focar o terminal de Full-Text Search
+  useEffect(() => {
+    const handleGlobalShortcut = (e) => {
+      if (modalChainsAberto) return
+      const tag = document.activeElement?.tagName?.toLowerCase()
+      const editandoTexto =
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        document.activeElement?.isContentEditable
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select()
+        return
+      }
+
+      if (!editandoTexto && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === '/') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalShortcut)
+    return () => window.removeEventListener('keydown', handleGlobalShortcut)
   }, [modalChainsAberto])
 
   // ---------------------------------------------------------------------------
@@ -650,6 +812,7 @@ function App() {
     debouncedBusca,
     filtroSeveridade,
     filtroKev,
+    filtroEpssAlto,
     filtroPrimitiva,
     filtroCluster,
     filtroTecnologia,
@@ -664,6 +827,7 @@ function App() {
       debouncedBusca,
       filtroSeveridade,
       filtroKev,
+      filtroEpssAlto,
       filtroPrimitiva,
       filtroCluster,
       filtroTecnologia,
@@ -676,6 +840,7 @@ function App() {
     debouncedBusca,
     filtroSeveridade,
     filtroKev,
+    filtroEpssAlto,
     filtroPrimitiva,
     filtroCluster,
     filtroTecnologia,
@@ -716,6 +881,7 @@ function App() {
         !ui.debouncedBusca &&
         ui.filtroSeveridade === 'TODOS' &&
         !ui.filtroKev &&
+        !ui.filtroEpssAlto &&
         ui.filtroPrimitiva === 'TODOS' &&
         ui.filtroCluster === 'TODOS' &&
         ui.filtroTecnologia === 'TODOS' &&
@@ -831,7 +997,7 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [apiUrl])
+  }, [apiUrl, refreshTick])
 
   // ---------------------------------------------------------------------------
   // EFEITO 4: Consulta Server-Side com GIN Full-Text Search e Cache de Página 1
@@ -846,6 +1012,7 @@ function App() {
         !debouncedBusca &&
         filtroSeveridade === 'TODOS' &&
         !filtroKev &&
+        !filtroEpssAlto &&
         filtroPrimitiva === 'TODOS' &&
         filtroCluster === 'TODOS' &&
         filtroTecnologia === 'TODOS' &&
@@ -853,7 +1020,7 @@ function App() {
 
       // Se já temos a página 1 em memória via cache instantâneo e não há busca/filtro ativa,
       // não exibe spinner intrusivo
-      const temCacheValido = semFiltrosAtivos && uiStateRef.current.temAmeacas
+      const temCacheValido = semFiltrosAtivos && uiStateRef.current.temAmeacas && refreshTick === 0
       if (!temCacheValido) {
         setCarregandoTabela(true)
       }
@@ -874,6 +1041,10 @@ function App() {
 
         if (filtroKev) {
           params.kev = 'true'
+        }
+
+        if (filtroEpssAlto) {
+          params.min_epss = 0.1
         }
 
         if (filtroPrimitiva && filtroPrimitiva !== 'TODOS') {
@@ -938,7 +1109,7 @@ function App() {
       isMounted = false
       controller.abort()
     }
-  }, [apiUrl, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade, filtroKev, filtroPrimitiva, filtroCluster, filtroTecnologia, ordenacao])
+  }, [apiUrl, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade, filtroKev, filtroEpssAlto, filtroPrimitiva, filtroCluster, filtroTecnologia, ordenacao, refreshTick])
 
   // ---------------------------------------------------------------------------
   // AÇÕES DE NAVEGAÇÃO E EXPANSÃO ACCORDION
@@ -957,8 +1128,10 @@ function App() {
 
   const limparTodosFiltros = () => {
     setTermoBusca('')
+    setDebouncedBusca('')
     setFiltroSeveridade('TODOS')
     setFiltroKev(false)
+    setFiltroEpssAlto(false)
     setFiltroPrimitiva('TODOS')
     setFiltroCluster('TODOS')
     setFiltroTecnologia('TODOS')
@@ -968,6 +1141,7 @@ function App() {
 
   const temFiltroAtivo = Boolean(
     filtroKev ||
+    filtroEpssAlto ||
     filtroPrimitiva !== 'TODOS' ||
     filtroCluster !== 'TODOS' ||
     filtroSeveridade !== 'TODOS' ||
@@ -1003,33 +1177,47 @@ function App() {
   const dadosSeveridade = useMemo(() => {
     const s = analyticsData.stats
     if (!s) return []
+    const totalBase = Math.max(1, Number(s.total_ameacas) || 0)
+    const calcPct = (v) => ((Number(v || 0) / totalBase) * 100).toFixed(1)
     return [
       {
         nome: 'Crítico',
+        severidadeKey: 'CRITICAL',
         faixa: 'CVSS 9.0 - 10.0',
         valor: Number(s.criticas) || 0,
+        percentual: calcPct(s.criticas),
+        ativa: filtroSeveridade === 'CRITICAL',
         cor: 'var(--critical-red)'
       },
       {
         nome: 'Alto',
+        severidadeKey: 'HIGH',
         faixa: 'CVSS 7.0 - 8.9',
         valor: Number(s.altas) || 0,
+        percentual: calcPct(s.altas),
+        ativa: filtroSeveridade === 'HIGH',
         cor: 'var(--high-orange)'
       },
       {
         nome: 'Médio',
+        severidadeKey: 'MEDIUM',
         faixa: 'CVSS 4.0 - 6.9',
         valor: Number(s.medias) || 0,
+        percentual: calcPct(s.medias),
+        ativa: filtroSeveridade === 'MEDIUM',
         cor: 'var(--medium-yellow)'
       },
       {
         nome: 'Baixo',
+        severidadeKey: 'LOW',
         faixa: 'CVSS 0.1 - 3.9',
         valor: Number(s.baixas) || 0,
+        percentual: calcPct(s.baixas),
+        ativa: filtroSeveridade === 'LOW',
         cor: 'var(--low-blue)'
       }
     ]
-  }, [analyticsData.stats])
+  }, [analyticsData.stats, filtroSeveridade])
 
   // Maior valor entre as tecnologias para escala percentual da barra
   const maxTechCount = useMemo(() => {
@@ -1147,45 +1335,105 @@ function App() {
           2. CARDS DE KPIS CONSOLIDADOS
           -------------------------------------------------------------------- */}
       <section id="metricas" className="kpi-grid">
-        <div className="kpi-card kpi-total">
+        <div
+          className={`kpi-card kpi-total ${temFiltroAtivo ? 'kpi-interactive' : ''}`}
+          onClick={temFiltroAtivo ? limparTodosFiltros : undefined}
+          role={temFiltroAtivo ? 'button' : undefined}
+          tabIndex={temFiltroAtivo ? 0 : undefined}
+          title={temFiltroAtivo ? 'Clique para limpar todos os filtros ativos' : 'Total de vulnerabilidades indexadas na base global'}
+          onKeyDown={
+            temFiltroAtivo
+              ? (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    limparTodosFiltros()
+                  }
+                }
+              : undefined
+          }
+        >
           <div className="kpi-card-header">
             <span className="kpi-title">Total Ingerido</span>
+            {Number(analyticsData.stats?.cisa_kev_total) > 0 && (
+              <span className="kpi-mini-pill pill-kev-mini" title="Vulnerabilidades exploradas ativamente (Catálogo CISA KEV)">
+                {Number(analyticsData.stats.cisa_kev_total).toLocaleString('pt-BR')} KEV
+              </span>
+            )}
           </div>
           <div className="kpi-value">
             {analyticsData.stats ? Number(analyticsData.stats.total_ameacas).toLocaleString('pt-BR') : '---'}
           </div>
           <div className="kpi-footer">
-            <span>Base Global NIST NVD</span>
+            <span>{temFiltroAtivo ? '✕ Clique p/ restaurar visão global' : 'Base Global NIST NVD'}</span>
           </div>
         </div>
 
-        <div className="kpi-card kpi-critical">
+        <div
+          className={`kpi-card kpi-critical kpi-interactive ${filtroSeveridade === 'CRITICAL' ? 'is-kpi-active' : ''}`}
+          onClick={() => alternarSeveridadeNoFeed('CRITICAL', true)}
+          role="button"
+          tabIndex={0}
+          title="Clique para filtrar ameaças CRITICAL no feed"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              alternarSeveridadeNoFeed('CRITICAL', true)
+            }
+          }}
+        >
           <div className="kpi-card-header">
             <span className="kpi-title">Ameaças Críticas</span>
+            {Number(analyticsData.stats?.total_ameacas) > 0 && (
+              <span className="kpi-mini-pill pill-crit-mini">
+                {((Number(analyticsData.stats.criticas || 0) / Math.max(1, Number(analyticsData.stats.total_ameacas))) * 100).toFixed(1)}%
+              </span>
+            )}
           </div>
           <div className="kpi-value">
             {analyticsData.stats ? Number(analyticsData.stats.criticas).toLocaleString('pt-BR') : '---'}
           </div>
           <div className="kpi-footer">
-            <span>CVSS Score &ge; 9.0</span>
+            <span>{filtroSeveridade === 'CRITICAL' ? '✓ Filtro ativo no feed' : 'CVSS Score ≥ 9.0'}</span>
           </div>
         </div>
 
-        <div className="kpi-card kpi-high">
+        <div
+          className={`kpi-card kpi-high kpi-interactive ${filtroSeveridade === 'HIGH' ? 'is-kpi-active' : ''}`}
+          onClick={() => alternarSeveridadeNoFeed('HIGH', true)}
+          role="button"
+          tabIndex={0}
+          title="Clique para filtrar ameaças HIGH no feed"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              alternarSeveridadeNoFeed('HIGH', true)
+            }
+          }}
+        >
           <div className="kpi-card-header">
             <span className="kpi-title">Ameaças Altas</span>
+            {Number(analyticsData.stats?.total_ameacas) > 0 && (
+              <span className="kpi-mini-pill pill-high-mini">
+                {((Number(analyticsData.stats.altas || 0) / Math.max(1, Number(analyticsData.stats.total_ameacas))) * 100).toFixed(1)}%
+              </span>
+            )}
           </div>
           <div className="kpi-value">
             {analyticsData.stats ? Number(analyticsData.stats.altas).toLocaleString('pt-BR') : '---'}
           </div>
           <div className="kpi-footer">
-            <span>CVSS Score 7.0 - 8.9</span>
+            <span>{filtroSeveridade === 'HIGH' ? '✓ Filtro ativo no feed' : 'CVSS Score 7.0 - 8.9'}</span>
           </div>
         </div>
 
         <div className="kpi-card kpi-score">
           <div className="kpi-card-header">
             <span className="kpi-title">Pior Risco Detectado</span>
+            {Number(analyticsData.stats?.media_score) > 0 && (
+              <span className="kpi-mini-pill pill-avg-mini" title="Score CVSS médio de todas as vulnerabilidades do catálogo">
+                MÉDIA {Number(analyticsData.stats.media_score).toFixed(1)}
+              </span>
+            )}
           </div>
           <div className="kpi-value">
             {analyticsData.stats?.pior_risco ? Number(analyticsData.stats.pior_risco).toFixed(1) : '0.0'}
@@ -1250,9 +1498,22 @@ function App() {
                   tick={{ fill: '#94a3b8', fontSize: 12, fontFamily: 'var(--font-mono)' }}
                 />
                 <Tooltip content={<CustomSeverityTooltip />} cursor={{ fill: 'rgba(255, 255, 255, 0.03)' }} />
-                <Bar dataKey="valor" radius={[6, 6, 0, 0]} maxBarSize={52}>
+                <Bar
+                  dataKey="valor"
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={52}
+                  style={{ cursor: 'pointer' }}
+                  onClick={(barData) => {
+                    const sevKey = barData?.severidadeKey || barData?.payload?.severidadeKey
+                    if (sevKey) alternarSeveridadeNoFeed(sevKey)
+                  }}
+                >
                   {dadosSeveridade.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.cor} />
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.cor}
+                      fillOpacity={filtroSeveridade === 'TODOS' || filtroSeveridade === entry.severidadeKey ? 1 : 0.32}
+                    />
                   ))}
                 </Bar>
               </BarChart>
@@ -1339,6 +1600,7 @@ function App() {
         <div className="search-terminal-box">
           <span className="terminal-prompt">&gt;_</span>
           <input
+            ref={searchInputRef}
             type="text"
             className="terminal-input"
             placeholder="Full-Text Search: digite termo técnico (ex: Remote Code Execution, Buffer Overflow, Apache, Windows)..."
@@ -1347,15 +1609,32 @@ function App() {
               setTermoBusca(e.target.value)
               setPaginaAtual(1)
             }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                if (termoBusca) {
+                  setTermoBusca('')
+                  setDebouncedBusca('')
+                  setPaginaAtual(1)
+                } else {
+                  e.currentTarget.blur()
+                }
+              }
+            }}
           />
-          {termoBusca && (
+          {!termoBusca ? (
+            <kbd className="terminal-kbd-hint" title="Atalho rápido: pressione / ou Ctrl+K para pesquisar">
+              /
+            </kbd>
+          ) : (
             <button
+              type="button"
               className="btn-clear-search"
               onClick={() => {
                 setTermoBusca('')
+                setDebouncedBusca('')
                 setPaginaAtual(1)
               }}
-              title="Limpar busca"
+              title="Limpar busca (ESC)"
             >
               &times;
             </button>
@@ -1422,6 +1701,22 @@ function App() {
               {analyticsData.stats?.cisa_kev_total !== undefined && (
                 <span className="pill-count">
                   {Number(analyticsData.stats.cisa_kev_total).toLocaleString('pt-BR')}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              className={`filter-pill pill-epss ${filtroEpssAlto ? 'active' : ''}`}
+              onClick={() => {
+                setFiltroEpssAlto((prev) => !prev)
+                setPaginaAtual(1)
+              }}
+              title="Filtrar vulnerabilidades com probabilidade EPSS ≥ 10% nos próximos 30 dias (FIRST.org)"
+            >
+              EPSS &ge; 10%
+              {Number(analyticsData.stats?.epss_alto_total) > 0 && (
+                <span className="pill-count">
+                  {Number(analyticsData.stats.epss_alto_total).toLocaleString('pt-BR')}
                 </span>
               )}
             </button>
@@ -1638,21 +1933,58 @@ function App() {
           )}
         </div>
 
-        <div className="table-responsive">
+        <div className={`table-responsive ${carregandoTabela && ameacas.length > 0 ? 'is-fetching' : ''}`}>
+          {carregandoTabela && ameacas.length > 0 && (
+            <div className="table-loading-bar" aria-hidden="true" />
+          )}
           <table className="soc-table">
             <thead>
               <tr>
                 <th>IDENTIFICADOR</th>
-                <th>SCORE CVSS</th>
-                <th>SEVERIDADE</th>
+                <th
+                  className="sortable"
+                  onClick={() => alternarOrdenacaoColuna(ordenacao === 'cvss_desc' ? 'epss_desc' : 'cvss_desc')}
+                  title="Clique para alternar ordenação entre Maior CVSS e Maior Probabilidade EPSS"
+                >
+                  SCORE CVSS
+                  {(ordenacao === 'cvss_desc' || ordenacao === 'epss_desc') && (
+                    <span className="sort-icon">{ordenacao === 'epss_desc' ? '⚡' : '▼'}</span>
+                  )}
+                </th>
+                <th
+                  className="sortable"
+                  onClick={() => alternarOrdenacaoColuna('kev_first')}
+                  title="Clique para priorizar vulnerabilidades exploradas ativamente (CISA KEV)"
+                >
+                  SEVERIDADE
+                  {ordenacao === 'kev_first' && <span className="sort-icon">▼</span>}
+                </th>
                 <th>DESCRIÇÃO TÉCNICA</th>
-                <th>PUBLICAÇÃO NIST</th>
+                <th
+                  className="sortable"
+                  onClick={() => alternarOrdenacaoColuna('recent')}
+                  title="Clique para ordenar pelas vulnerabilidades mais recentes (NIST NVD)"
+                >
+                  PUBLICAÇÃO NIST
+                  {ordenacao === 'recent' && <span className="sort-icon">▼</span>}
+                </th>
               </tr>
             </thead>
             <tbody>
               {ameacas.length > 0 ? (
                 ameacas.map((item) => {
                   const isExpanded = !!expandedCves[item.cve_id]
+                  const chainRelacionada = cveParaChainMap.get(item.cve_id) || null
+                  const mitreItem = obterMitrePasso(item)
+                  const cweValido = Boolean(item.cwe && item.cwe !== 'NVD-CWE-noinfo' && item.cwe !== 'NVD-CWE-Other')
+                  const cweUrl = cweValido ? obterUrlMitreCwe(item.cwe) : null
+                  const epssPct = formatarEpssPercent(item.epss_score)
+                  const epssPercentilFmt =
+                    Number(item.epss_percentile) > 0
+                      ? ` (Percentil ${(Number(item.epss_percentile) * 100).toFixed(1)}%)`
+                      : ''
+                  const copiadoEste = copiadoCveId === item.cve_id
+
                   return (
                     <tr
                       key={item.cve_id}
@@ -1682,6 +2014,18 @@ function App() {
                           </a>
                           <button
                             type="button"
+                            className={`btn-copy-cve-inline ${copiadoEste ? 'is-copied' : ''}`}
+                            onClick={(e) => copiarIdCve(e, item.cve_id)}
+                            title={copiadoEste ? 'ID copiado!' : `Copiar ${item.cve_id}`}
+                            aria-label={`Copiar ${item.cve_id}`}
+                          >
+                            {copiadoEste ? '✓' : '⎘'}
+                          </button>
+                          <span className="desktop-row-chevron" aria-hidden="true">
+                            {isExpanded ? '▴' : '▾'}
+                          </span>
+                          <button
+                            type="button"
                             className="btn-card-expand"
                             aria-label={isExpanded ? 'Recolher detalhes' : 'Expandir detalhes'}
                             tabIndex={-1}
@@ -1700,58 +2044,129 @@ function App() {
                           {item.severidade || 'N/A'}
                         </span>
                       </td>
-                      <td className="cve-desc-cell" title={item.descricao}>
+                      <td className="cve-desc-cell" title={isExpanded ? undefined : item.descricao}>
                         <div className="cve-desc-body">
                           {item.descricao}
                         </div>
                         {(
                           item.cisa_kev ||
-                          Number(item.epss_score) > 0 ||
-                          (item.cwe && item.cwe !== 'NVD-CWE-noinfo' && item.cwe !== 'NVD-CWE-Other') ||
+                          epssPct ||
+                          cweValido ||
                           (item.primitiva && item.primitiva !== 'GENERIC_VULN') ||
                           (item.cluster_label && item.cluster_label !== 'Geral / Não Clusterizado') ||
-                          (item.tecnologia && item.tecnologia !== 'Desconhecido / Geral')
+                          (item.tecnologia && item.tecnologia !== 'Desconhecido / Geral') ||
+                          chainRelacionada
                         ) && (
                           <div className="cve-ml-tags">
                             {item.cisa_kev && (
-                              <span
-                                className="cve-kev-tag"
-                                title="Confirmada no catálogo CISA Known Exploited Vulnerabilities (Explorada Ativamente)"
+                              <button
+                                type="button"
+                                className={`cve-kev-tag tag-interactive ${filtroKev ? 'is-tag-active' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setFiltroKev((prev) => !prev)
+                                  setPaginaAtual(1)
+                                }}
+                                title="Confirmada no catálogo CISA KEV (Explorada Ativamente) — clique para filtrar por KEV"
                               >
                                 CISA KEV
-                              </span>
+                              </button>
                             )}
-                            {Number(item.epss_score) > 0 && (
-                              <span
-                                className={`cve-epss-tag ${Number(item.epss_score) >= 0.1 ? 'is-high-epss' : ''}`}
-                                title={`Probabilidade EPSS FIRST.org de exploração nos próximos 30 dias: ${formatarEpssPercent(item.epss_score)}`}
+                            {epssPct && (
+                              <button
+                                type="button"
+                                className={`cve-epss-tag tag-interactive ${Number(item.epss_score) >= 0.1 ? 'is-high-epss' : ''} ${filtroEpssAlto ? 'is-tag-active' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setFiltroEpssAlto((prev) => !prev)
+                                  setPaginaAtual(1)
+                                }}
+                                title={`Probabilidade EPSS FIRST.org em 30 dias: ${epssPct}${epssPercentilFmt} — clique para filtrar EPSS ≥ 10%`}
                               >
-                                EPSS {formatarEpssPercent(item.epss_score)}
-                              </span>
+                                EPSS {epssPct}
+                              </button>
                             )}
-                            {item.cwe && item.cwe !== 'NVD-CWE-noinfo' && item.cwe !== 'NVD-CWE-Other' && (
-                              <span className="cve-cwe-tag">
+                            {cweValido && (
+                              <button
+                                type="button"
+                                className="cve-cwe-tag tag-interactive"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const proximo = termoBusca.trim().toUpperCase() === String(item.cwe).toUpperCase() ? '' : item.cwe
+                                  setTermoBusca(proximo)
+                                  setDebouncedBusca(proximo)
+                                  setPaginaAtual(1)
+                                }}
+                                title={`Filtrar catálogo por ${item.cwe}`}
+                              >
                                 {item.cwe}
-                              </span>
+                              </button>
                             )}
                             {item.primitiva && item.primitiva !== 'GENERIC_VULN' && (
-                              <span className={`cve-primitive-tag primitive-${String(item.primitiva).toLowerCase()}`}>
+                              <button
+                                type="button"
+                                className={`cve-primitive-tag tag-interactive primitive-${String(item.primitiva).toLowerCase()} ${filtroPrimitiva === item.primitiva ? 'is-tag-active' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setFiltroPrimitiva((prev) => (prev === item.primitiva ? 'TODOS' : item.primitiva))
+                                  setPaginaAtual(1)
+                                }}
+                                title={`Filtrar Kill Chain por ${item.primitiva}`}
+                              >
                                 {item.primitiva}
-                              </span>
+                              </button>
                             )}
                             {item.cluster_label && item.cluster_label !== 'Geral / Não Clusterizado' && (
-                              <span className="cve-cluster-tag">
+                              <button
+                                type="button"
+                                className={`cve-cluster-tag tag-interactive ${filtroCluster === item.cluster_label ? 'is-tag-active' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setFiltroCluster((prev) => (prev === item.cluster_label ? 'TODOS' : item.cluster_label))
+                                  setPaginaAtual(1)
+                                }}
+                                title={`Filtrar ML Cluster: ${item.cluster_label}`}
+                              >
                                 {item.cluster_label}
-                              </span>
+                              </button>
                             )}
                             {item.tecnologia && item.tecnologia !== 'Desconhecido / Geral' && (
-                              <span className="cve-tech-tag">
+                              <button
+                                type="button"
+                                className={`cve-tech-tag tag-interactive ${filtroTecnologia === item.tecnologia ? 'is-tag-active' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setFiltroTecnologia((prev) => (prev === item.tecnologia ? 'TODOS' : item.tecnologia))
+                                  setPaginaAtual(1)
+                                }}
+                                title={`Filtrar ecossistema: ${item.tecnologia}`}
+                              >
                                 {item.tecnologia}
-                              </span>
+                              </button>
+                            )}
+                            {chainRelacionada && (
+                              <button
+                                type="button"
+                                className="cve-chain-tag tag-interactive"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  abrirChainEspecifica(chainRelacionada)
+                                }}
+                                title={`Esta vulnerabilidade compõe a Exploit Chain #${chainRelacionada.chain_id} — clique para abrir o Attack Blueprint`}
+                              >
+                                ⚡ CHAIN #{chainRelacionada.chain_id}
+                              </button>
                             )}
                           </div>
                         )}
                         <div className="cve-expanded-actions">
+                          <button
+                            type="button"
+                            className={`btn-action-secondary ${copiadoEste ? 'is-copied' : ''}`}
+                            onClick={(e) => copiarIdCve(e, item.cve_id)}
+                          >
+                            <span>{copiadoEste ? '✓ ID Copiado' : `⎘ Copiar ${item.cve_id}`}</span>
+                          </button>
                           <a
                             href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(item.cve_id)}`}
                             target="_blank"
@@ -1759,9 +2174,45 @@ function App() {
                             className="btn-nvd-action"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <span>Consultar CVE no NIST NVD</span>
+                            <span>NIST NVD</span>
                             <span>↗</span>
                           </a>
+                          <a
+                            href={obterUrlMitreTechnique(mitreItem.technique_id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn-action-secondary btn-mitre-action"
+                            title={`MITRE ATT&CK ${mitreItem.tactic_id} (${mitreItem.tactic}) — ${mitreItem.technique}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span>MITRE {mitreItem.technique_id}</span>
+                            <span>↗</span>
+                          </a>
+                          {cweUrl && (
+                            <a
+                              href={cweUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn-action-secondary"
+                              title={`Definição oficial ${item.cwe} no MITRE`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <span>{item.cwe}</span>
+                              <span>↗</span>
+                            </a>
+                          )}
+                          {chainRelacionada && (
+                            <button
+                              type="button"
+                              className="btn-action-secondary btn-chain-action"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                abrirChainEspecifica(chainRelacionada)
+                              }}
+                            >
+                              <span>⚡ Blueprint #{chainRelacionada.chain_id}</span>
+                            </button>
+                          )}
                         </div>
                       </td>
                       <td className="cve-date-cell">
@@ -1787,6 +2238,15 @@ function App() {
                           ? 'Processando consulta indexada com GIN no AWS RDS'
                           : 'Tente ajustar os termos da pesquisa ou selecionar outro filtro de severidade.'}
                       </div>
+                      {!carregandoTabela && temFiltroAtivo && (
+                        <button
+                          type="button"
+                          className="btn-empty-reset"
+                          onClick={limparTodosFiltros}
+                        >
+                          ✕ Limpar Filtros Ativos
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1867,11 +2327,22 @@ function App() {
         <div>
           CYBER THREAT INTEL // <span className="footer-tech">BY SANAK3 // FULL-TEXT SEARCH GIN // NUMPY + AWS RDS + NODE EXPRESS + REACT 19</span>
         </div>
-        {ultimaAtualizacao && (
-          <div>
-            SINCRONIZAÇÃO: <span style={{ color: 'var(--neon-green)' }}>{ultimaAtualizacao}</span>
-          </div>
-        )}
+        <div className="footer-sync-group">
+          {ultimaAtualizacao && (
+            <span>
+              SINCRONIZAÇÃO: <span style={{ color: 'var(--neon-green)' }}>{ultimaAtualizacao}</span>
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn-footer-sync"
+            onClick={forcarSincronizacao}
+            disabled={sincronizandoNuvem}
+            title="Forçar ressincronização imediata com a API e banco PostgreSQL"
+          >
+            {sincronizandoNuvem ? '↻ Sincronizando...' : '↻ Atualizar'}
+          </button>
+        </div>
       </footer>
 
       {/* --------------------------------------------------------------------
@@ -2146,14 +2617,24 @@ function App() {
                           )}
                         </div>
 
-                        <button
-                          type="button"
-                          className={`btn-copy-writeup ${copiadoWriteup ? 'is-copied' : ''}`}
-                          onClick={() => copiarWriteupMarkdown(activeChain)}
-                          title="Copiar relatório técnico em Markdown para Jira / Slack / TheHive"
-                        >
-                          {copiadoWriteup ? '✓ Markdown Copiado' : '⎘ Exportar Markdown'}
-                        </button>
+                        <div className="writeup-actions-group">
+                          <button
+                            type="button"
+                            className="btn-export-chain-json"
+                            onClick={() => exportarChainJson(activeChain)}
+                            title="Baixar Attack Blueprint completo em JSON estruturado (STIX-friendly / SIEM)"
+                          >
+                            ⬇ JSON
+                          </button>
+                          <button
+                            type="button"
+                            className={`btn-copy-writeup ${copiadoWriteup ? 'is-copied' : ''}`}
+                            onClick={() => copiarWriteupMarkdown(activeChain)}
+                            title="Copiar relatório técnico em Markdown para Jira / Slack / TheHive"
+                          >
+                            {copiadoWriteup ? '✓ Markdown Copiado' : '⎘ Exportar Markdown'}
+                          </button>
+                        </div>
                       </div>
 
                       <div className="writeup-header">
@@ -2201,7 +2682,19 @@ function App() {
                             const mitreTopo = obterMitrePasso(passo)
                             return (
                               <Fragment key={`topo-${passo.cve_id}-${idx}`}>
-                                <div className={`topology-node primitive-border-${String(passo.primitiva || '').toLowerCase()}`}>
+                                <div
+                                  className={`topology-node topology-node-clickable primitive-border-${String(passo.primitiva || '').toLowerCase()} ${highlightedStepIdx === idx ? 'is-node-active' : ''}`}
+                                  onClick={() => focarPassoTimeline(idx)}
+                                  role="button"
+                                  tabIndex={0}
+                                  title={`Ir para detalhes táticos do Elo 0${passo.passo || idx + 1} (${passo.cve_id})`}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault()
+                                      focarPassoTimeline(idx)
+                                    }
+                                  }}
+                                >
                                   <div className="topology-node-top">
                                     <span className="topology-step-num">ELO 0{passo.passo || idx + 1}</span>
                                     <div className="topology-top-pills">
@@ -2250,12 +2743,17 @@ function App() {
                         {activeBlueprintMeta.passos.map((passo, idx) => {
                           const ultimoPasso = idx === activeBlueprintMeta.passos.length - 1
                           const cweValido = passo.cwe && passo.cwe !== 'NVD-CWE-noinfo' && passo.cwe !== 'NVD-CWE-Other'
+                          const cweStepUrl = cweValido ? obterUrlMitreCwe(passo.cwe) : null
                           const primSlug = String(passo.primitiva || '').toLowerCase()
                           const mitrePasso = obterMitrePasso(passo)
                           const epssPassoFmt = formatarEpssPercent(passo.epss_score)
 
                           return (
-                            <div key={`step-${passo.cve_id}-${idx}`} className="timeline-item">
+                            <div
+                              key={`step-${passo.cve_id}-${idx}`}
+                              id={`chain-step-${idx}`}
+                              className="timeline-item"
+                            >
                               <div className="timeline-rail" aria-hidden="true">
                                 <span className={`timeline-node-badge ${passo.cisa_kev ? 'is-kev' : ''}`}>
                                   0{passo.passo || idx + 1}
@@ -2263,7 +2761,7 @@ function App() {
                                 {!ultimoPasso && <span className="timeline-rail-line" />}
                               </div>
 
-                              <div className={`timeline-step-card primitive-accent-${primSlug}`}>
+                              <div className={`timeline-step-card primitive-accent-${primSlug} ${highlightedStepIdx === idx ? 'is-step-highlighted' : ''}`}>
                                 <div className="step-card-top">
                                   <div className="step-card-meta-left">
                                     <span className="step-role-tag">
@@ -2296,7 +2794,20 @@ function App() {
                                       <span>↗</span>
                                     </a>
                                     {cweValido && (
-                                      <span className="cve-cwe-tag">{passo.cwe}</span>
+                                      cweStepUrl ? (
+                                        <a
+                                          href={cweStepUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="cve-cwe-tag cwe-link-tag"
+                                          title={`Consultar definição oficial ${passo.cwe} no MITRE`}
+                                        >
+                                          <span>{passo.cwe}</span>
+                                          <span>↗</span>
+                                        </a>
+                                      ) : (
+                                        <span className="cve-cwe-tag">{passo.cwe}</span>
+                                      )
                                     )}
                                     {epssPassoFmt && (
                                       <span
