@@ -6,7 +6,7 @@
 [![API - Render](https://img.shields.io/badge/Backend-Render-46E3B7?style=flat&logo=render)](https://cyber-threat-intel-mmks.onrender.com)
 [![Database - AWS RDS](https://img.shields.io/badge/AWS-RDS%20PostgreSQL-FF9900?style=flat&logo=amazon-aws)](https://aws.amazon.com/rds/)
 
-Plataforma integrada de inteligência contra ameaças cibernéticas (**CTI - Cyber Threat Intelligence**) de nível corporativo. Automatiza a extração resiliente das vulnerabilidades mais recentes (**10.000+ CVEs ativas**) da API oficial do **NIST NVD v2.0**, enriquecimento com metadados estruturados (**CVSS v4.0/v3.x/v2.0**, **CWE**, **CPE**, catálogo oficial **CISA KEV** e probabilidades **EPSS FIRST.org**), motor de **Machine Learning (TF-IDF + K-Means)**, detecção de caminhos de ataque (**Exploit Chains em Grafos com NetworkX** mapeadas ao **MITRE ATT&CK Enterprise**) e um painel tático de SOC em **React 19**.
+Plataforma integrada de inteligência contra ameaças cibernéticas (**CTI - Cyber Threat Intelligence**) de nível corporativo. Automatiza a extração resiliente das vulnerabilidades mais recentes (**20.000+ CVEs ativas**) da API oficial do **NIST NVD v2.0**, mesclagem integral do catálogo **CISA KEV**, enriquecimento com metadados estruturados (**CVSS v4.0/v3.x/v2.0**, **CWE**, **CPE** e probabilidades **EPSS FIRST.org**), motor de **Machine Learning (TF-IDF + K-Means)**, detecção de caminhos de ataque (**Exploit Chains em Grafos com NetworkX** mapeadas ao **MITRE ATT&CK Enterprise**) e um painel tático de SOC em **React 19**.
 
 ---
 
@@ -21,7 +21,7 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (**CTI - Cyb
 ## Arquitetura do Sistema
 
 ```text
-   [ NIST NVD API 2.0 + CISA KEV + FIRST.org EPSS ] ── (10k CVEs Recentes + ?noRejected + Probabilidade 30d)
+   [ NIST NVD API 2.0 + CISA KEV + FIRST.org EPSS ] ── (20k+ CVEs Recentes + ?hasKev + ?noRejected + Probabilidade 30d)
             │
             ▼ (Paginação com Pooling TLS / Rate Limit Dinâmico / Enriquecimento em Lotes)
   [ Data Pipeline ETL ] ── (NumPy Vectorized Risk Engine + CVSS v4.0 / v3.x / v2.0 + CWE + CPE)
@@ -45,7 +45,7 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (**CTI - Cyb
 ## Principais Recursos e Diferenciais de Engenharia
 
 ### 1. Ingestão Multi-Fonte Resiliente (NIST NVD + CISA KEV + FIRST.org EPSS)
-- **Offset Dinâmico de CVEs Recentes:** Calcula `startIndex = totalResults - 10000` via descoberta com retentativas resilientes (abortando com segurança em falhas críticas para impedir ingestão acidental de CVEs legadas de 1999).
+- **Offset Dinâmico de 20.000+ CVEs Recentes:** Calcula `startIndex = totalResults - 20000` via descoberta com retentativas resilientes (abortando com segurança em falhas críticas para impedir ingestão acidental de CVEs legadas de 1999) e incorpora integralmente o catálogo complementar `?hasKev` (resultando em ~21,7k CVEs únicas ativas).
 - **Filtragem Dupla de CVEs Revogadas:** Exclui candidatos rejeitados diretamente na requisição (`?noRejected`) e valida `vulnStatus == REJECTED` / prefixos `** REJECT **` na transformação.
 - **Cascata Completa de Métricas CVSS:** Suporte nativo a **CVSS v3.1 → CVSS v4.0 → CVSS v3.0 → CVSS v2.0**, priorizando avaliações `Primary` (NIST NVD) sobre `Secondary` (CNA/ADP) e normalizando notas $\ge 9.0$ legadas do v2 para `CRITICAL`.
 - **Enriquecimento Oficial CISA KEV & EPSS:** Cruzamento direto com o feed oficial **CISA Known Exploited Vulnerabilities** e consulta paginada em lotes na API do **FIRST.org EPSS**, agregando probabilidade empírica de exploração nos próximos 30 dias (`epss_score` e `epss_percentile`) junto a **CWE** e **CPE 2.3**.
@@ -68,8 +68,8 @@ Plataforma integrada de inteligência contra ameaças cibernéticas (**CTI - Cyb
 
 ### 5. SOC Dashboard Interativo (React 19 + Vite 8 + Recharts 3)
 - **Hidratação Instantânea Versionada (`v2`):** Renderização imediata (`0ms`) via cache local versionado no `localStorage`, com expurgo automático de chaves legadas e sincronização silenciosa em segundo plano.
-- **Filtros Táticos, Ordenação & Exportação Segura:** Filtragem server-side combinável por severidade CVSS, **CISA KEV**, **Kill Chain**, **ML Clusters**, **Ecossistema Tecnológico** clicável e seletor de ordenação (`CVSS`, `EPSS`, `KEV`, `NIST`), além de exportação em **CSV** (sanitizada contra *CSV Formula Injection*) e **JSON**.
-- **Modal Split-View de Exploit Chains & MITRE ATT&CK:** Inspeção interativa de *Attack Blueprints* com topologia encadeada, badges de probabilidade **EPSS**, links diretos para técnicas oficiais no `attack.mitre.org` e exportação de relatório Markdown para ferramentas de resposta a incidentes.
+- **Filtros Táticos, Pivoting & Exportação Segura:** Filtragem server-side combinável por severidade CVSS (inclusive clicando nos KPIs ou nas barras do gráfico), **CISA KEV**, **EPSS ≥ 10%** (`?min_epss=0.1`), **Kill Chain**, **ML Clusters**, **Ecossistema Tecnológico**, tags interativas por linha, cabeçalhos ordenáveis (`CVSS`, `EPSS`, `KEV`, `NIST`), atalhos globais de teclado (`/` ou `Ctrl+K`), accordion desktop/mobile com ações rápidas (NIST NVD, MITRE ATT&CK, MITRE CWE e Blueprint) e exportação em **CSV** (sanitizada contra *CSV Formula Injection*) e **JSON**.
+- **Modal Split-View de Exploit Chains & MITRE ATT&CK:** Inspeção interativa de *Attack Blueprints* com navegação por teclado (`↑`/`↓` e `ESC`), topologia clicável sincronizada com a timeline tática, badges de probabilidade **EPSS**, links diretos para técnicas oficiais no `attack.mitre.org` / `cwe.mitre.org` e exportação individual em **Markdown** e **JSON**.
 
 ### 6. Qualidade de Código, Testes & CI/CD (GitHub Actions)
 - **CI Full-Stack Quality Gate (`ci.yml`):** Pipeline paralelo disparado em todo push/PR executando suíte `pytest` (Python 3.12), verificação sintática + testes de integração da API com `node --test` (Node.js 20) e `eslint` + build de produção Vite 8 no frontend.
