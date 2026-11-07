@@ -598,7 +598,7 @@ async function obterDefaultThreats(limit = 25) {
     `;
     const { rows } = await pool.query(dataQuery, [limit]);
 
-    let totalRegistros = 10000;
+    let totalRegistros = 20000;
     if (memoryCache.stats.data && memoryCache.stats.data.total_ameacas) {
         totalRegistros = parseInt(memoryCache.stats.data.total_ameacas, 10);
     } else {

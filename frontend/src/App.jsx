@@ -1266,7 +1266,7 @@ function App() {
             <span>CYBER THREAT INTEL</span>
             <span className="brand-tag">SOC ENGINE</span>
             <span className="brand-tag author-tag">BY SANAK3</span>
-            <span className="brand-tag volume-tag">10.000+ CVEs</span>
+            <span className="brand-tag volume-tag">20.000+ CVEs</span>
           </h1>
           <p className="brand-subtitle">
             &gt;_ High-Performance GIN Search Intelligence &amp; Real-Time Threat Telemetry
