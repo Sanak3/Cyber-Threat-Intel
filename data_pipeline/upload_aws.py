@@ -40,7 +40,7 @@ def notificar_flush_cache():
         print(f"[!] [ETL Load] Aviso: Não foi possível notificar flush de cache: {e_webhook}")
 
 
-def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=True):
+def upload_to_aws(total_registros=20000, batch_size=1000, limpar_base_antiga=True):
     """
     Executa o pipeline ETL ponta a ponta:
     1. Extração paginada de até N registros da API do NIST NVD.
@@ -302,5 +302,5 @@ def upload_to_aws(total_registros=10000, batch_size=1000, limpar_base_antiga=Tru
 
 
 if __name__ == "__main__":
-    sucesso = upload_to_aws(total_registros=10000, batch_size=1000)
+    sucesso = upload_to_aws(total_registros=20000, batch_size=1000)
     sys.exit(0 if sucesso else 1)

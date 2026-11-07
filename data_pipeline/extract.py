@@ -125,7 +125,7 @@ def extrair_scores_epss(cve_ids, chunk_size=100, timeout=15):
 
 
 def extrair_dados_nist(
-    total_desejado=10000,
+    total_desejado=20000,
     max_por_pagina=2000,
     buscar_mais_recentes=True,
     janela_dias=None,
@@ -141,7 +141,7 @@ def extrair_dados_nist(
     - Paginação inteligente até atingir o total desejado de registros.
     - Controle rigoroso de rate limit com retries exponenciais e tratamento de 429/503/504.
 
-    :param total_desejado: Número total de registros a serem coletados (padrão: 10.000).
+    :param total_desejado: Número total de registros a serem coletados (padrão: 20.000).
     :param max_por_pagina: Limite máximo de registros por requisição da API (máximo NIST: 2.000).
     :param buscar_mais_recentes: Se True, inicia a busca pelas CVEs mais recentes do catálogo.
     :param janela_dias: Se informado (ex: 90), usa filtro de data no formato ISO da NIST v2.0 (máx 120 dias).
@@ -339,4 +339,4 @@ def extrair_dados_nist(
 
 
 if __name__ == "__main__":
-    resultado = extrair_dados_nist(total_desejado=10000)
+    resultado = extrair_dados_nist(total_desejado=20000)

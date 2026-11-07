@@ -479,5 +479,11 @@ class TestThreatPipeline(unittest.TestCase):
         self.assertAlmostEqual(writeup["passos_ataque"][0]["epss_score"], 0.92, places=2)
 
 
+    def test_escala_padrao_20k_nist(self):
+        import inspect
+        sig = inspect.signature(extrair_dados_nist)
+        self.assertEqual(sig.parameters["total_desejado"].default, 20000)
+
+
 if __name__ == "__main__":
     unittest.main()
