@@ -1234,8 +1234,11 @@ function App() {
             <span className="analytics-badge">MATRIZ DE RISCO GLOBAL</span>
           </div>
           <div className="chart-container-inner chart-wide">
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={dadosSeveridade} margin={{ top: 15, right: 20, left: -10, bottom: 5 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={dadosSeveridade}
+                margin={{ top: 15, right: 20, left: 0, bottom: 5 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                 <XAxis
                   dataKey="nome"
@@ -1247,7 +1250,7 @@ function App() {
                   tick={{ fill: '#94a3b8', fontSize: 12, fontFamily: 'var(--font-mono)' }}
                 />
                 <Tooltip content={<CustomSeverityTooltip />} cursor={{ fill: 'rgba(255, 255, 255, 0.03)' }} />
-                <Bar dataKey="valor" radius={[6, 6, 0, 0]}>
+                <Bar dataKey="valor" radius={[6, 6, 0, 0]} maxBarSize={52}>
                   {dadosSeveridade.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.cor} />
                   ))}

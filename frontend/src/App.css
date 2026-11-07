@@ -342,6 +342,7 @@
   display: grid;
   grid-template-columns: 2fr 1.15fr;
   gap: 1.25rem;
+  align-items: stretch;
 }
 
 @media (max-width: 1024px) {
@@ -360,13 +361,20 @@
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 0.75rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   min-height: 310px;
+  min-width: 0;
 }
 
 .analytics-card.card-wide {
   position: relative;
+  min-width: 0;
+}
+
+.analytics-card.card-compact {
+  min-width: 0;
 }
 
 .analytics-card:hover {
@@ -378,7 +386,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.25rem;
   flex-wrap: wrap;
   gap: 0.5rem;
 }
@@ -408,16 +416,40 @@
 
 .chart-container-inner {
   width: 100%;
+  min-width: 0;
   height: 240px;
+  position: relative;
+  flex: 1;
 }
 
 /* Ranking de Tecnologias / Ecossistemas Afetados */
 .tech-ranking-list {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-  min-height: 220px;
-  height: auto;
+  gap: 0.55rem;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+  scrollbar-width: thin;
+  scrollbar-color: #1e293b transparent;
+}
+
+.tech-ranking-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tech-ranking-list::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 4px;
+}
+
+.tech-ranking-list::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+.tech-ranking-list::-webkit-scrollbar-thumb:hover {
+  background: var(--electric-cyan);
 }
 
 .tech-ranking-item {
@@ -1477,10 +1509,13 @@
 
   .chart-container-inner {
     height: 190px;
+    flex: none;
   }
 
   .tech-ranking-list {
+    max-height: none;
     height: auto;
+    overflow-y: visible;
     gap: 0.55rem;
     padding: 0.25rem 0;
   }
