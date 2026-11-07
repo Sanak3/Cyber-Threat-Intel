@@ -97,6 +97,23 @@ const obterPapelPasso = (idx, total) => {
   return 'Pivoting Tático'
 }
 
+const formatarEpssPercent = (val) => {
+  const num = Number(val)
+  if (!Number.isFinite(num) || num <= 0) return null
+  const pct = num * 100
+  if (pct < 0.1) return '<0.1%'
+  return `${pct.toFixed(1)}%`
+}
+
+const sanitizarCelulaCsv = (valor) => {
+  if (valor === null || valor === undefined) return '""'
+  let str = String(valor).replace(/\0/g, '').replace(/\r?\n/g, ' ').trim()
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`
+  }
+  return `"${str.replace(/"/g, '""')}"`
+}
+
 function App() {
   const PROD_API_URL = 'https://cyber-threat-intel-mmks.onrender.com'
   const [apiUrl, setApiUrl] = useState(() => {
@@ -191,13 +208,15 @@ function App() {
   })
   const [carregandoTabela, setCarregandoTabela] = useState(false)
 
-  // 3. Estados de Filtros e Paginação
+  // 3. Estados de Filtros, Ordenação e Paginação
   const [termoBusca, setTermoBusca] = useState('')
   const [debouncedBusca, setDebouncedBusca] = useState('')
   const [filtroSeveridade, setFiltroSeveridade] = useState('TODOS')
   const [filtroKev, setFiltroKev] = useState(false)
   const [filtroPrimitiva, setFiltroPrimitiva] = useState('TODOS')
   const [filtroCluster, setFiltroCluster] = useState('TODOS')
+  const [filtroTecnologia, setFiltroTecnologia] = useState('TODOS')
+  const [ordenacao, setOrdenacao] = useState('cvss_desc')
   const [paginaAtual, setPaginaAtual] = useState(1)
   const [itensPorPagina, setItensPorPagina] = useState(() => {
     if (typeof window !== 'undefined' && window.innerWidth <= 768) {
@@ -336,6 +355,7 @@ function App() {
     setFiltroKev(false)
     setFiltroPrimitiva('TODOS')
     setFiltroCluster('TODOS')
+    setFiltroTecnologia('TODOS')
     setPaginaAtual(1)
     setTermoBusca(cveId)
     setDebouncedBusca(cveId)
@@ -345,6 +365,87 @@ function App() {
         window.scrollTo({ top: topOffset, behavior: 'smooth' })
       }
     }, 60)
+  }
+
+  const selecionarTecnologiaNoFeed = (techNome) => {
+    const proximo = filtroTecnologia === techNome ? 'TODOS' : techNome
+    setFiltroTecnologia(proximo)
+    setPaginaAtual(1)
+    if (proximo !== 'TODOS' && threatTableRef.current) {
+      const topOffset = threatTableRef.current.getBoundingClientRect().top + window.scrollY - 20
+      window.scrollTo({ top: topOffset, behavior: 'smooth' })
+    }
+  }
+
+  const dispararDownloadArquivo = (conteudo, nomeArquivo, mimeType) => {
+    const blob = new Blob([conteudo], { type: mimeType })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = nomeArquivo
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  const exportarFeedCsv = () => {
+    if (!ameacas.length) return
+    const cabecalhos = [
+      'CVE_ID',
+      'CVSS_SCORE',
+      'EPSS_PROBABILITY',
+      'SEVERIDADE',
+      'CISA_KEV',
+      'CWE',
+      'PRIMITIVA_KILL_CHAIN',
+      'TECNOLOGIA',
+      'ML_CLUSTER',
+      'PUBLICACAO_NIST',
+      'DESCRICAO'
+    ]
+    const linhas = ameacas.map((item) => [
+      sanitizarCelulaCsv(item.cve_id),
+      sanitizarCelulaCsv(Number(item.nota_cvss || 0).toFixed(1)),
+      sanitizarCelulaCsv(formatarEpssPercent(item.epss_score) || '0.0%'),
+      sanitizarCelulaCsv(item.severidade || 'UNKNOWN'),
+      sanitizarCelulaCsv(item.cisa_kev ? 'TRUE' : 'FALSE'),
+      sanitizarCelulaCsv(item.cwe || 'NVD-CWE-noinfo'),
+      sanitizarCelulaCsv(item.primitiva || 'GENERIC_VULN'),
+      sanitizarCelulaCsv(item.tecnologia || 'Desconhecido / Geral'),
+      sanitizarCelulaCsv(item.cluster_label || 'Geral / Não Clusterizado'),
+      sanitizarCelulaCsv(item.data_publicacao || item.data_extracao || ''),
+      sanitizarCelulaCsv(item.descricao || '')
+    ].join(','))
+
+    const csvFinal = `\uFEFF${[cabecalhos.join(','), ...linhas].join('\n')}`
+    const stamp = new Date().toISOString().slice(0, 10)
+    dispararDownloadArquivo(csvFinal, `cti-threats-p${paginaAtual}-${stamp}.csv`, 'text/csv;charset=utf-8;')
+  }
+
+  const exportarFeedJson = () => {
+    if (!ameacas.length) return
+    const payload = {
+      exported_at: new Date().toISOString(),
+      page: paginaAtual,
+      total_matching_records: totalRegistros,
+      filters: {
+        search: debouncedBusca || null,
+        severity: filtroSeveridade,
+        cisa_kev_only: filtroKev,
+        primitive: filtroPrimitiva,
+        cluster: filtroCluster,
+        technology: filtroTecnologia,
+        sort: ordenacao
+      },
+      vulnerabilities: ameacas
+    }
+    const stamp = new Date().toISOString().slice(0, 10)
+    dispararDownloadArquivo(
+      JSON.stringify(payload, null, 2),
+      `cti-threats-p${paginaAtual}-${stamp}.json`,
+      'application/json;charset=utf-8;'
+    )
   }
 
   const copiarWriteupMarkdown = async (chain) => {
@@ -464,6 +565,8 @@ function App() {
     filtroKev,
     filtroPrimitiva,
     filtroCluster,
+    filtroTecnologia,
+    ordenacao,
     itensPorPagina,
     temAmeacas: ameacas.length > 0
   })
@@ -476,6 +579,8 @@ function App() {
       filtroKev,
       filtroPrimitiva,
       filtroCluster,
+      filtroTecnologia,
+      ordenacao,
       itensPorPagina,
       temAmeacas: ameacas.length > 0
     }
@@ -486,6 +591,8 @@ function App() {
     filtroKev,
     filtroPrimitiva,
     filtroCluster,
+    filtroTecnologia,
+    ordenacao,
     itensPorPagina,
     ameacas.length
   ])
@@ -523,7 +630,9 @@ function App() {
         ui.filtroSeveridade === 'TODOS' &&
         !ui.filtroKev &&
         ui.filtroPrimitiva === 'TODOS' &&
-        ui.filtroCluster === 'TODOS'
+        ui.filtroCluster === 'TODOS' &&
+        ui.filtroTecnologia === 'TODOS' &&
+        ui.ordenacao === 'cvss_desc'
 
       if (data.initialThreats?.dados && semFiltrosAtivos && (ui.itensPorPagina === 25 || ui.itensPorPagina === 10)) {
         const total = Number(data.initialThreats.total) || 0
@@ -651,7 +760,9 @@ function App() {
         filtroSeveridade === 'TODOS' &&
         !filtroKev &&
         filtroPrimitiva === 'TODOS' &&
-        filtroCluster === 'TODOS'
+        filtroCluster === 'TODOS' &&
+        filtroTecnologia === 'TODOS' &&
+        ordenacao === 'cvss_desc'
 
       // Se já temos a página 1 em memória via cache instantâneo e não há busca/filtro ativa,
       // não exibe spinner intrusivo
@@ -684,6 +795,14 @@ function App() {
 
         if (filtroCluster && filtroCluster !== 'TODOS') {
           params.cluster = filtroCluster
+        }
+
+        if (filtroTecnologia && filtroTecnologia !== 'TODOS') {
+          params.technology = filtroTecnologia
+        }
+
+        if (ordenacao && ordenacao !== 'cvss_desc') {
+          params.sort = ordenacao
         }
 
         const res = await axios.get(`${apiUrl}/api/threats`, {
@@ -732,7 +851,7 @@ function App() {
       isMounted = false
       controller.abort()
     }
-  }, [apiUrl, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade, filtroKev, filtroPrimitiva, filtroCluster])
+  }, [apiUrl, paginaAtual, itensPorPagina, debouncedBusca, filtroSeveridade, filtroKev, filtroPrimitiva, filtroCluster, filtroTecnologia, ordenacao])
 
   // ---------------------------------------------------------------------------
   // AÇÕES DE NAVEGAÇÃO E EXPANSÃO ACCORDION
@@ -755,8 +874,20 @@ function App() {
     setFiltroKev(false)
     setFiltroPrimitiva('TODOS')
     setFiltroCluster('TODOS')
+    setFiltroTecnologia('TODOS')
+    setOrdenacao('cvss_desc')
     setPaginaAtual(1)
   }
+
+  const temFiltroAtivo = Boolean(
+    filtroKev ||
+    filtroPrimitiva !== 'TODOS' ||
+    filtroCluster !== 'TODOS' ||
+    filtroSeveridade !== 'TODOS' ||
+    filtroTecnologia !== 'TODOS' ||
+    ordenacao !== 'cvss_desc' ||
+    termoBusca
+  )
 
   const toggleExpandCve = (cveId) => {
     setExpandedCves(prev => ({
@@ -1061,18 +1192,19 @@ function App() {
           <div className="tech-ranking-list">
             {analyticsData.topTecnologias.map((tech) => {
               const porcentagem = Math.round((tech.total / maxTechCount) * 100)
+              const techAtiva = filtroTecnologia === tech.nome
               return (
                 <div
                   key={tech.nome}
-                  className="tech-ranking-item tech-clickable"
-                  onClick={() => abrirModalPorEcossistema(tech.nome)}
+                  className={`tech-ranking-item tech-clickable ${techAtiva ? 'is-active-tech' : ''}`}
+                  onClick={() => selecionarTecnologiaNoFeed(tech.nome)}
                   role="button"
                   tabIndex={0}
-                  title={`Clique para explorar as Exploit Chains de ${tech.nome}`}
+                  title={`Filtrar feed por ${tech.nome} (ou clique em Chains para ver cadeias de ataque)`}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
-                      abrirModalPorEcossistema(tech.nome)
+                      selecionarTecnologiaNoFeed(tech.nome)
                     }
                   }}
                 >
@@ -1081,7 +1213,17 @@ function App() {
                       {tech.nome}
                     </span>
                     <div className="tech-ranking-right">
-                      <span className="tech-chain-tag">Chains</span>
+                      <button
+                        type="button"
+                        className="tech-chain-tag"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          abrirModalPorEcossistema(tech.nome)
+                        }}
+                        title={`Abrir Exploit Chains de ${tech.nome}`}
+                      >
+                        Chains
+                      </button>
                       <span className="tech-ranking-count" style={{ color: tech.cor }}>
                         {tech.total.toLocaleString('pt-BR')} CVEs
                       </span>
@@ -1195,19 +1337,58 @@ function App() {
             </button>
           </div>
 
-          <div className="filter-stats-text">
-            {carregandoTabela ? (
-              <span style={{ color: 'var(--electric-cyan)' }}>Executando Full-Text Search no PostgreSQL...</span>
-            ) : (
-              <span>
-                Exibindo <span className="filter-stats-highlight">{ameacas.length}</span> nesta página (Total: <span className="filter-stats-highlight">{totalRegistros.toLocaleString('pt-BR')}</span>)
-              </span>
-            )}
+          <div className="filter-right-controls">
+            <div className="sort-selector-group">
+              <label htmlFor="soc-sort-select" className="sort-selector-label">ORDEM:</label>
+              <select
+                id="soc-sort-select"
+                className="soc-sort-select"
+                value={ordenacao}
+                onChange={(e) => {
+                  setOrdenacao(e.target.value)
+                  setPaginaAtual(1)
+                }}
+              >
+                <option value="cvss_desc">Maior Risco (CVSS)</option>
+                <option value="epss_desc">Maior Probab. (EPSS)</option>
+                <option value="kev_first">CISA KEV Primeiro</option>
+                <option value="recent">Mais Recentes (NIST)</option>
+              </select>
+            </div>
+
+            <div className="filter-stats-text">
+              {carregandoTabela ? (
+                <span style={{ color: 'var(--electric-cyan)' }}>Executando Full-Text Search no PostgreSQL...</span>
+              ) : (
+                <span>
+                  Exibindo <span className="filter-stats-highlight">{ameacas.length}</span> nesta página (Total: <span className="filter-stats-highlight">{totalRegistros.toLocaleString('pt-BR')}</span>)
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        {(clustersData.primitivas?.length > 0 || clustersData.clusters?.length > 0 || filtroKev || filtroPrimitiva !== 'TODOS' || filtroCluster !== 'TODOS') && (
+        {(clustersData.primitivas?.length > 0 || clustersData.clusters?.length > 0 || temFiltroAtivo) && (
           <div className="ml-clusters-bar">
+            {filtroTecnologia !== 'TODOS' && (
+              <div className="ml-clusters-row">
+                <span className="ml-clusters-label">ECOSSISTEMA:</span>
+                <div className="ml-clusters-group">
+                  <button
+                    type="button"
+                    className="cluster-chip chip-tech-active active"
+                    onClick={() => {
+                      setFiltroTecnologia('TODOS')
+                      setPaginaAtual(1)
+                    }}
+                    title="Remover filtro de tecnologia"
+                  >
+                    <span>{filtroTecnologia}</span>
+                    <span>✕</span>
+                  </button>
+                </div>
+              </div>
+            )}
             {clustersData.primitivas?.length > 0 && (
               <div className="ml-clusters-row">
                 <span className="ml-clusters-label">KILL CHAIN:</span>
@@ -1230,7 +1411,7 @@ function App() {
                     )
                   })}
 
-                  {!(clustersData.clusters?.length > 0) && (filtroKev || filtroPrimitiva !== 'TODOS' || filtroCluster !== 'TODOS' || filtroSeveridade !== 'TODOS' || termoBusca) && (
+                  {!(clustersData.clusters?.length > 0) && temFiltroAtivo && (
                     <button
                       type="button"
                       className="btn-reset-ml-filters"
@@ -1265,7 +1446,7 @@ function App() {
                     )
                   })}
 
-                  {(filtroKev || filtroPrimitiva !== 'TODOS' || filtroCluster !== 'TODOS' || filtroSeveridade !== 'TODOS' || termoBusca) && (
+                  {temFiltroAtivo && (
                     <button
                       type="button"
                       className="btn-reset-ml-filters"
@@ -1277,7 +1458,7 @@ function App() {
                 </div>
               </div>
             ) : (
-              !(clustersData.primitivas?.length > 0) && (filtroKev || filtroPrimitiva !== 'TODOS' || filtroCluster !== 'TODOS') && (
+              !(clustersData.primitivas?.length > 0) && temFiltroAtivo && (
                 <div className="ml-clusters-row">
                   <div className="ml-clusters-group">
                     <button
@@ -1310,9 +1491,29 @@ function App() {
             </span>
           </div>
 
-          {/* Ações Rápidas de Visualização e Paginação no Topo */}
+          {/* Ações Rápidas de Exportação, Visualização e Paginação no Topo */}
           {totalRegistros > 0 && (
             <div className="section-header-actions">
+              <div className="export-actions-group">
+                <button
+                  type="button"
+                  className="btn-export-feed"
+                  onClick={exportarFeedCsv}
+                  disabled={!ameacas.length}
+                  title="Exportar página atual em CSV (protegido contra Formula Injection)"
+                >
+                  ⬇ CSV
+                </button>
+                <button
+                  type="button"
+                  className="btn-export-feed"
+                  onClick={exportarFeedJson}
+                  disabled={!ameacas.length}
+                  title="Exportar página atual em JSON estruturado"
+                >
+                  ⬇ JSON
+                </button>
+              </div>
               <button
                 type="button"
                 className="btn-view-toggle"
@@ -1415,6 +1616,7 @@ function App() {
                         </div>
                         {(
                           item.cisa_kev ||
+                          Number(item.epss_score) > 0 ||
                           (item.cwe && item.cwe !== 'NVD-CWE-noinfo' && item.cwe !== 'NVD-CWE-Other') ||
                           (item.primitiva && item.primitiva !== 'GENERIC_VULN') ||
                           (item.cluster_label && item.cluster_label !== 'Geral / Não Clusterizado') ||
@@ -1427,6 +1629,14 @@ function App() {
                                 title="Confirmada no catálogo CISA Known Exploited Vulnerabilities (Explorada Ativamente)"
                               >
                                 CISA KEV
+                              </span>
+                            )}
+                            {Number(item.epss_score) > 0 && (
+                              <span
+                                className={`cve-epss-tag ${Number(item.epss_score) >= 0.1 ? 'is-high-epss' : ''}`}
+                                title={`Probabilidade EPSS FIRST.org de exploração nos próximos 30 dias: ${formatarEpssPercent(item.epss_score)}`}
+                              >
+                                EPSS {formatarEpssPercent(item.epss_score)}
                               </span>
                             )}
                             {item.cwe && item.cwe !== 'NVD-CWE-noinfo' && item.cwe !== 'NVD-CWE-Other' && (
