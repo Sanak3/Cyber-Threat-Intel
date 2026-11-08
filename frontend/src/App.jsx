@@ -37,11 +37,11 @@ const CustomSeverityTooltip = ({ active, payload }) => {
 }
 
 const CACHE_KEYS = {
-  overview: 'cti_overview_cache_v2',
-  analytics: 'cti_analytics_cache_v2',
-  threatsPage1: 'cti_threats_page1_v2',
-  totalRegistros: 'cti_total_registros_v2',
-  lastSync: 'cti_last_sync_v2'
+  overview: 'cti_overview_cache_v3',
+  analytics: 'cti_analytics_cache_v3',
+  threatsPage1: 'cti_threats_page1_v3',
+  totalRegistros: 'cti_total_registros_v3',
+  lastSync: 'cti_last_sync_v3'
 }
 
 const LEGACY_CACHE_KEYS = [
@@ -49,7 +49,12 @@ const LEGACY_CACHE_KEYS = [
   'cti_analytics_cache',
   'cti_threats_page1',
   'cti_total_registros',
-  'cti_last_sync'
+  'cti_last_sync',
+  'cti_overview_cache_v2',
+  'cti_analytics_cache_v2',
+  'cti_threats_page1_v2',
+  'cti_total_registros_v2',
+  'cti_last_sync_v2'
 ]
 
 const PRIMITIVE_LABELS = {
@@ -911,8 +916,12 @@ function App() {
 
       try {
         // 1. Tenta a rota consolidada de alta velocidade (/api/threats/overview)
+        const overviewReqConfig = {
+          timeout: 25000,
+          params: refreshTick > 0 ? { _t: Date.now() } : undefined
+        }
         try {
-          const overviewRes = await axios.get(`${activeUrl}/api/threats/overview`, { timeout: 25000 })
+          const overviewRes = await axios.get(`${activeUrl}/api/threats/overview`, overviewReqConfig)
           if (overviewRes.data && overviewRes.data.status === 'OK') {
             if (!isMounted) return
             aplicarOverviewConsolidado(overviewRes.data)
@@ -924,7 +933,7 @@ function App() {
             activeUrl = PROD_API_URL
             setApiUrl(PROD_API_URL)
             try {
-              const prodOverview = await axios.get(`${PROD_API_URL}/api/threats/overview`, { timeout: 25000 })
+              const prodOverview = await axios.get(`${PROD_API_URL}/api/threats/overview`, overviewReqConfig)
               if (prodOverview.data && prodOverview.data.status === 'OK') {
                 if (!isMounted) return
                 aplicarOverviewConsolidado(prodOverview.data)
@@ -1061,6 +1070,10 @@ function App() {
 
         if (ordenacao && ordenacao !== 'cvss_desc') {
           params.sort = ordenacao
+        }
+
+        if (refreshTick > 0) {
+          params._t = Date.now()
         }
 
         const res = await axios.get(`${apiUrl}/api/threats`, {
